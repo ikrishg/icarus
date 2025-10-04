@@ -9,25 +9,25 @@ import { Menu } from './scenes/Menu';
 import { Play } from './scenes/Play';
 
 const config: Phaser.Types.Core.GameConfig = {
-  type: AUTO,
-  width: WIDTH,
-  height: HEIGHT,
-  title: 'Icarus',
-  url: 'https://icarus.krishg.com',
-  version: packageData.version,
-  pixelArt: true,
-  backgroundColor: '#1b1b1c',
-  scene: [Boot, Home, Menu, Play, About, Credits],
-  scale: {
-    mode: Scale.ScaleModes.FIT,
-    autoCenter: Scale.Center.NO_CENTER,
-    fullscreenTarget: 'icarus-window',
-    max: { width: WIDTH, height: HEIGHT },
-  },
+	type: AUTO,
+	width: WIDTH,
+	height: HEIGHT,
+	title: 'Icarus',
+	url: 'https://icarus.krishg.com',
+	version: packageData.version,
+	pixelArt: true,
+	backgroundColor: '#1b1b1c',
+	scene: [Boot, Home, Menu, Play, About, Credits],
+	scale: {
+		mode: Scale.ScaleModes.FIT,
+		autoCenter: Scale.Center.NO_CENTER,
+		fullscreenTarget: 'icarus-window',
+		max: { width: WIDTH, height: HEIGHT },
+	},
 };
 
 const StartGame = (parent: string) => {
-  return new Game({ ...config, parent });
+	return new Game({ ...config, parent });
 };
 
 export default StartGame;

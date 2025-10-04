@@ -1,133 +1,173 @@
 import { type GameObjects, Scene } from 'phaser';
+import { BackgroundManager } from '../../game/Background';
 import { HEIGHT, WIDTH } from '../../util/constants';
 
 export class Menu extends Scene {
-  background: GameObjects.Image;
-  wordmark: GameObjects.Image;
-  instruction: GameObjects.Text;
-  navigation: Array<{
-    key: string;
-    scene: string;
-  }>;
-  menu: GameObjects.Text[] = [];
-  selectedIndex = 0;
-  arrow: GameObjects.Text;
-  // visual sizes and layout
-  unselectedSize = 64;
-  selectedSize = 80;
-  arrowOffset = 0;
-  menuLeft = 0;
+	background: GameObjects.Image;
+	wordmark: GameObjects.Image;
+	instruction: GameObjects.Text;
+	navigation: Array<{
+		key: string;
+		scene: string;
+	}>;
+	menu: GameObjects.Text[] = [];
+	selectedIndex = 0;
+	arrow: GameObjects.Image;
+	menuBackdrop?: GameObjects.Graphics;
+	backgroundManager: BackgroundManager;
 
-  constructor() {
-    super('Menu');
+	unselectedSize = 64;
+	selectedSize = 80;
+	arrowOffset = 0;
+	menuLeft = 0;
 
-    this.navigation = [
-      { key: 'START GAME', scene: 'Play' },
-      { key: 'ABOUT', scene: 'About' },
-      { key: 'CREDITS', scene: 'Credits' },
-    ];
-  }
+	constructor() {
+		super('Menu');
 
-  create() {
-    this.background = this.add
-      .image(0, 0, 'background')
-      .setOrigin(0)
-      .setDisplaySize(WIDTH, HEIGHT);
+		this.navigation = [
+			{ key: 'START GAME', scene: 'Play' },
+			{ key: 'ABOUT', scene: 'About' },
+			{ key: 'CREDITS', scene: 'Credits' },
+		];
+	}
 
-    this.wordmark = this.add
-      .image(WIDTH / 2, HEIGHT / 4, 'wordmark');
+	create() {
+		this.backgroundManager = new BackgroundManager(this);
 
-    // Layout: left-align the menu text and compute positions from the wordmark bounds
-    const startY = HEIGHT / 2;
-    const lineHeight = 96;
+		this.wordmark = this.add
+			.image(WIDTH / 2, HEIGHT / 4, 'wordmark')
+			.setDepth(3);
 
-    // compute the left edge of the wordmark image so arrow's left aligns with it
-    const wordmarkBounds = this.wordmark.getBounds();
-    this.menuLeft = wordmarkBounds.left;
+		const startY = HEIGHT / 2;
+		const lineHeight = 96;
 
-    // create a persistent arrow indicator whose left edge is exactly the wordmark left
-    this.arrow = this.add
-      .text(this.menuLeft, startY, '▶', {
-        fontFamily: 'Pixelify Sans',
-        fontSize: `${this.selectedSize}px`,
-        color: '#ffffff',
-      })
-      // set origin so x is the left edge of the glyph
-      .setOrigin(0, 0.5)
-      .setDepth(10);
+		const wordmarkBounds = this.wordmark.getBounds();
+		this.menuLeft = wordmarkBounds.left;
 
-    // measure arrow width and set menu start x accordingly
-    const arrowPadding = 16;
-    const menuStartX = this.menuLeft + this.arrow.width + arrowPadding;
+		this.arrow = this.add
+			.image(this.menuLeft, startY, 'arrow')
+			.setOrigin(0, 0.5)
+			.setDepth(7);
 
-    this.navigation.forEach((item, i) => {
-      const menuText = this.add
-        .text(menuStartX, startY + i * lineHeight, item.key, {
-          fontFamily: 'Pixelify Sans',
-          fontSize: `${this.unselectedSize}px`,
-          color: '#1b1b1c',
-        })
-        // left align each line and vertically center
-        .setOrigin(0, 0.5)
-        .setInteractive({ useHandCursor: true });
+		this.arrow.setDisplaySize(this.selectedSize, this.selectedSize);
 
-      menuText.on('pointerdown', () => this.activateIndex(i));
-      menuText.on('pointerover', () => this.setSelected(i));
+		const arrowPadding = 16;
 
-      this.menu.push(menuText);
-    });
+		const menuStartX =
+			this.menuLeft +
+			(this.arrow.displayWidth ?? this.arrow.width) +
+			arrowPadding;
 
-    this.setSelected(0);
+		this.navigation.forEach((item, i) => {
+			const menuText = this.add
+				.text(menuStartX, startY + i * lineHeight, item.key, {
+					fontFamily: 'Pixelify Sans',
+					fontSize: `${this.unselectedSize}px`,
+					color: '#1b1b1c',
+				})
+				.setOrigin(0, 0.5)
+				.setInteractive({ useHandCursor: true })
+				.setDepth(6);
 
-    this.input.keyboard?.on('keydown', (event: KeyboardEvent) => {
-      switch (event.code) {
-        case 'ArrowUp':
-        case 'KeyW':
-          this.moveSelection(-1);
-          break;
-        case 'ArrowDown':
-        case 'KeyS':
-          this.moveSelection(1);
-          break;
-        case 'Enter':
-        case 'Space':
-          this.activateIndex(this.selectedIndex);
-          break;
-      }
-    });
-  }
+			menuText.on('pointerdown', () => this.activateIndex(i));
+			menuText.on('pointerover', () => this.setSelected(i));
 
+			this.menu.push(menuText);
+		});
 
-  setSelected(index: number) {
-    this.selectedIndex = Phaser.Math.Clamp(index, 0, this.menu.length - 1);
-    this.menu.forEach((t, i) => {
-      if (i === this.selectedIndex) {
-        t.setStyle({ color: '#ffffff' });
-        t.setFontSize(this.selectedSize);
-      } else {
-        t.setStyle({ color: '#1b1b1c' });
-        t.setFontSize(this.unselectedSize);
-      }
-    });
+		this.menuBackdrop = this.add.graphics();
+		this.menuBackdrop.setDepth(4);
 
-    // position the arrow to the left of the selected item
-    const selected = this.menu[this.selectedIndex];
-    if (this.arrow && selected) {
-      // keep the arrow's left edge aligned with the wordmark left
-      this.arrow.setPosition(this.menuLeft, selected.y);
-      this.arrow.setFontSize(this.selectedSize);
-      this.arrow.setVisible(true);
-    }
-  }
+		this.setSelected(0);
 
-  moveSelection(delta: number) {
-    const next = (this.selectedIndex + delta + this.menu.length) % this.menu.length;
-    this.setSelected(next);
-  }
+		this.input.keyboard?.on('keydown', (event: KeyboardEvent) => {
+			switch (event.code) {
+				case 'ArrowUp':
+				case 'KeyW':
+					this.moveSelection(-1);
+					break;
+				case 'ArrowDown':
+				case 'KeyS':
+					this.moveSelection(1);
+					break;
+				case 'Enter':
+				case 'Space':
+					this.activateIndex(this.selectedIndex);
+					break;
+			}
+		});
+	}
 
-  activateIndex(i: number) {
-    const scene = this.navigation[i].scene;
+	setSelected(index: number) {
+		this.selectedIndex = Phaser.Math.Clamp(index, 0, this.menu.length - 1);
+		this.menu.forEach((t, i) => {
+			t.setStyle({ color: '#ffffff' });
 
-    if (scene) this.scene.start(scene);
-  }
+			if (i === this.selectedIndex) {
+				t.setFontSize(this.selectedSize);
+			} else {
+				t.setFontSize(this.unselectedSize);
+			}
+		});
+
+		const selected = this.menu[this.selectedIndex];
+		if (this.arrow && selected) {
+			this.arrow.setPosition(this.menuLeft, selected.y);
+			this.arrow.setDisplaySize(this.selectedSize, this.selectedSize);
+			this.arrow.setVisible(true);
+		}
+
+		this.updateMenuBackdrop();
+	}
+
+	updateMenuBackdrop() {
+		if (!this.menuBackdrop) return;
+
+		let minX = Number.POSITIVE_INFINITY;
+		let minY = Number.POSITIVE_INFINITY;
+		let maxX = Number.NEGATIVE_INFINITY;
+		let maxY = Number.NEGATIVE_INFINITY;
+
+		this.menu.forEach((t) => {
+			const b = t.getBounds();
+			minX = Math.min(minX, b.left);
+			minY = Math.min(minY, b.top);
+			maxX = Math.max(maxX, b.right);
+			maxY = Math.max(maxY, b.bottom);
+		});
+
+		if (this.arrow) {
+			const ab = this.arrow.getBounds();
+			minX = Math.min(minX, ab.left);
+			minY = Math.min(minY, ab.top);
+			maxX = Math.max(maxX, ab.right);
+			maxY = Math.max(maxY, ab.bottom);
+		}
+
+		const paddingX = Math.max(24, Math.floor(this.selectedSize * 0.6));
+		const paddingY = Math.max(12, Math.floor(this.selectedSize * 0.35));
+
+		const rectX = Math.max(8, minX - paddingX);
+		const rectY = Math.max(8, minY - paddingY);
+		const rectW = Math.min(WIDTH - 16, maxX - minX + paddingX * 2);
+		const rectH = Math.min(HEIGHT - 16, maxY - minY + paddingY * 2);
+
+		this.menuBackdrop.clear();
+		const backdropColor = 0x000000;
+		const backdropAlpha = 0.75;
+		this.menuBackdrop.fillStyle(backdropColor, backdropAlpha);
+		this.menuBackdrop.fillRoundedRect(rectX, rectY, rectW, rectH, 12);
+	}
+
+	moveSelection(delta: number) {
+		const next =
+			(this.selectedIndex + delta + this.menu.length) % this.menu.length;
+		this.setSelected(next);
+	}
+
+	activateIndex(i: number) {
+		const scene = this.navigation[i].scene;
+
+		if (scene) this.scene.switch(scene);
+	}
 }
