@@ -12,9 +12,9 @@
   },
   "devDependencies": {
     "@types/bun": "^1.2.23",
-    "terser": "^5.39.0",
-    "typescript": "~5.7.2",
-    "vite": "^6.3.1"
+    "terser": "^5.44.0",
+    "typescript": "~5.9.3",
+    "vite": "^7.1.9"
   },
   "dependencies": {
     "phaser": "^3.90.0"
