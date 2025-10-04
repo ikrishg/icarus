@@ -106,7 +106,7 @@ jobs:
 
   deploy:
     name: Deploy
-    needs: [changelog, release]
+    needs: [changelog]
     if: needs.changelog.outputs.skipped == 'false'
     runs-on: ubuntu-latest
 
