@@ -11,10 +11,10 @@
     "build": "bunx --bun vite build --config vite/config.prod.mjs"
   },
   "devDependencies": {
-    "@types/bun": "^1.2.23",
-    "terser": "^5.44.0",
-    "typescript": "~5.9.3",
-    "vite": "^7.1.9"
+    "@types/bun": "1.2.23",
+    "terser": "5.44.0",
+    "typescript": "5.9.3",
+    "vite": "7.1.9"
   },
   "dependencies": {
     "phaser": "^3.90.0"
