@@ -60,6 +60,10 @@ jobs:
     if: needs.changelog.outputs.skipped == 'false'
     runs-on: ubuntu-latest
 
+    environment:
+      name: itch
+      url: ${{ steps.itchio.conclusion == 'success' && 'https://kkrishguptaa.itch.io/icarus' }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
@@ -83,6 +87,7 @@ jobs:
           ./butler -V
 
       - name: Push to itch.io
+        id: itchio
         run: |
           ./butler push dist kkrishguptaa/icarus:default --userversion ${{ needs.changelog.outputs.tag }} --if-changed
         env:
@@ -98,3 +103,35 @@ jobs:
           name: ${{ needs.changelog.outputs.tag }}
           body: ${{ needs.changelog.outputs.clean_changelog }}
           files: ${{ needs.changelog.outputs.tag }}.zip
+
+  deploy:
+    name: Deploy
+    needs: [changelog, release]
+    if: needs.changelog.outputs.skipped == 'false'
+    runs-on: ubuntu-latest
+
+    environment:
+      name: cloudflare-pages
+      url: ${{ steps.wrangler.outputs.deployment-url && 'https://icarus.krishg.com' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Build Website
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@da0e0dfe58b7a431659754fdf3f186c529afbe65 # v3
+        id: wrangler
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: "pages deploy"

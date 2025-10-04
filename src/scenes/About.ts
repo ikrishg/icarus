@@ -1,8 +1,8 @@
 import { type GameObjects, Scene } from 'phaser';
-import { HEIGHT, WIDTH } from '../../util/constants';
-import { BackgroundManager } from '../Background';
+import { BackgroundManager } from '../components/Background';
+import { HEIGHT, WIDTH } from '../util/constants';
 
-export class Credits extends Scene {
+export class About extends Scene {
   backgroundManager: BackgroundManager;
   creditsHeadline!: GameObjects.Text;
   creditsBody!: GameObjects.Text;
@@ -10,7 +10,7 @@ export class Credits extends Scene {
   clickHint!: GameObjects.Text;
 
   constructor() {
-    super('Credits');
+    super('About');
   }
 
   create() {
@@ -31,7 +31,7 @@ export class Credits extends Scene {
     const bodyY = headlineY + headlineFontSize + gapAfterHeadline;
 
     this.creditsHeadline = this.add
-      .text(leftPadding, headlineY, 'CREDITS', {
+      .text(leftPadding, headlineY, 'ABOUT', {
         font: `${headlineFontSize}px Pixelify Sans`,
         color: '#ffffff',
         align: 'left',
@@ -44,9 +44,7 @@ export class Credits extends Scene {
       .text(
         leftPadding,
         bodyY,
-        `Made by Krish Gupta (krishg.com).
-Read the readme on GitHub for more info on things such as assets.
-(kkrishguptaa/icarus)`,
+        `The fall of Icarus, the legendary Icarus who dared to fly too close to the sun with wings made of feathers and wax, is a timeless tale of ambition, hubris, and the consequences of overreaching one's limits. Crafted in the spirit of classic arcade games, this project is a tribute to the enduring allure of myth and the thrill of adventure. This game is one where you go through a platformer but have to lose one ability each level. Every 5 levels you gain 3 abilities back. Choose carefully, or you might have to restart from the beginning!`,
         {
           font: `${bodyFontSize}px Pixelify Sans`,
           color: '#ffffff',
@@ -61,11 +59,16 @@ Read the readme on GitHub for more info on things such as assets.
     const hintFontSize = 40;
 
     this.clickHint = this.add
-      .text(WIDTH - 24, HEIGHT - 18, 'click anywhere or press any key to go back', {
-        font: `${hintFontSize}px Pixelify Sans`,
-        color: '#ffffff',
-        align: 'right',
-      })
+      .text(
+        WIDTH - 24,
+        HEIGHT - 18,
+        'click anywhere or press any key to go back',
+        {
+          font: `${hintFontSize}px Pixelify Sans`,
+          color: '#ffffff',
+          align: 'right',
+        },
+      )
       .setOrigin(1, 1)
       .setAlpha(0.95)
       .setDepth(4);

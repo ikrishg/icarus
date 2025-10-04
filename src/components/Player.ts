@@ -23,9 +23,10 @@ export class Player {
     this.scene = scene;
 
     // Create player sprite using Icarus spritesheet (2x size)
+    // Original sprite is 256x276, with 2x scale at 0.6 = ~154x166 pixels
     this.sprite = this.scene.physics.add
       .sprite(x, y, 'icarus')
-      .setScale(0.3) // 2x larger - was 0.15, now 0.3
+      .setScale(0.6) // 2x scale for consistency
       .setDepth(10);
 
     // Play the flying animation
@@ -36,11 +37,11 @@ export class Player {
     this.sprite.setCollideWorldBounds(true);
 
     // Set body size for better collision detection
-    // Original sprite is 256x276, scaled to 0.3 = ~77x83 pixels
-    // Make hitbox slightly smaller for better gameplay
+    // Scaled sprite is ~154x166 pixels
+    // Make hitbox slightly smaller for better gameplay (~80% of visual size)
     const body = this.sprite.body as Phaser.Physics.Arcade.Body;
-    body.setSize(60, 70); // Tight hitbox around the character
-    body.setOffset(98, 103); // Center the hitbox on the sprite
+    body.setSize(120, 140); // Proper 2x hitbox
+    body.setOffset(68, 63); // Center the hitbox on the sprite
 
     // Setup keyboard controls
     this.cursors = this.scene.input.keyboard?.createCursorKeys();

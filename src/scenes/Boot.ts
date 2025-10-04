@@ -14,10 +14,14 @@ export class Boot extends Scene {
       frameWidth: 256,
       frameHeight: 276,
     });
+    this.load.spritesheet('ground', 'assets/ground.webp', { frameWidth: 448, frameHeight: 162 });
+    this.load.spritesheet('lava', 'assets/lava.webp', { frameWidth: 832, frameHeight: 192 });
+    this.load.spritesheet('spikes', 'assets/spikes.webp', { frameWidth: 402, frameHeight: 129 });
+    this.load.spritesheet('enemy', 'assets/enemy.webp', { frameWidth: 336, frameHeight: 498 });
+    this.load.spritesheet('portal', 'assets/portal.webp', { frameWidth: 192, frameHeight: 256 });
   }
 
   create() {
-    // Create Icarus flying animation for player
     if (!this.anims.exists('player-fly')) {
       this.anims.create({
         key: 'player-fly',
