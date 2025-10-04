@@ -45,7 +45,7 @@ export class Menu extends Scene {
 		this.menuLeft = wordmarkBounds.left;
 
 		this.arrow = this.add
-			.image(this.menuLeft, startY, 'arrow')
+			.image(this.menuLeft, startY, 'sword')
 			.setOrigin(0, 0.5)
 			.setDepth(7);
 
