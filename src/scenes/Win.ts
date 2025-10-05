@@ -106,19 +106,19 @@ export class Win extends Scene {
     );
 
     if (spaceKey) {
-      spaceKey.once('down', () => {
+      spaceKey.on('down', () => {
         this.scene.start('Play');
       });
     }
 
     if (escKey) {
-      escKey.once('down', () => {
+      escKey.on('down', () => {
         this.scene.start('Menu');
       });
     }
 
     // Also allow mouse click to go to menu
-    this.input.once('pointerdown', () => {
+    this.input.on('pointerdown', () => {
       this.scene.start('Menu');
     });
   }

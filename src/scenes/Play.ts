@@ -25,6 +25,16 @@ export class Play extends Scene {
     this.levelManager = new LevelManager(this);
     this.levelManager.goto(0);
 
+    // Reset to level 0 when returning from Dead scene
+    this.events.once('wake', () => {
+      this.isResetting = true;
+      this.abilityManager.reset();
+      this.levelManager.goto(0);
+      this.resetPlayer();
+      this.showLevelInstruction();
+      this.isResetting = false;
+    });
+
     this.player = new Player(
       this,
       this.levelManager.current.start.x,
@@ -111,8 +121,9 @@ export class Play extends Scene {
     this.cameras.main.flash(300, 255, 0, 0);
 
     this.time.delayedCall(1500, () => {
-      // Switch to Dead scene
-      this.scene.start('Dead');
+      this.levelManager.goto(0);
+      this.resetPlayer();
+      this.scene.switch('Dead');
     });
   }
 
@@ -162,8 +173,9 @@ export class Play extends Scene {
   }
 
   showWinScreen() {
-    // Switch to Win scene with level count
-    this.scene.start('Win', { totalLevels: this.levelManager.levels.length });
+    this.levelManager.goto(0);
+    this.resetPlayer();
+    this.scene.switch('Win', { totalLevels: this.levelManager.levels.length });
   }
 
   setupCollisions() {
