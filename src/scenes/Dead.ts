@@ -70,7 +70,7 @@ export class Dead extends Scene {
       .text(
         WIDTH / 2,
         hintsY,
-        'Press SPACE to try again\nPress ESC to return to menu',
+        'Press any key to reload',
         {
           font: `${hintFontSize}px Pixelify Sans`,
           color: '#cccccc',
@@ -92,29 +92,13 @@ export class Dead extends Scene {
       ease: 'Sine.easeInOut',
     });
 
-    // Handle input
-    const spaceKey = this.input.keyboard?.addKey(
-      Phaser.Input.Keyboard.KeyCodes.SPACE,
-    );
-    const escKey = this.input.keyboard?.addKey(
-      Phaser.Input.Keyboard.KeyCodes.ESC,
-    );
+    // Reload browser on any key press or click
+    this.input.keyboard?.once('keydown', () => {
+      window.location.reload();
+    });
 
-    if (spaceKey) {
-      spaceKey.on('down', () => {
-        this.scene.switch('Play');
-      });
-    }
-
-    if (escKey) {
-      escKey.on('down', () => {
-        this.scene.start('Menu');
-      });
-    }
-
-    // Also allow mouse click to go to menu
-    this.input.on('pointerdown', () => {
-      this.scene.start('Menu');
+    this.input.once('pointerdown', () => {
+      window.location.reload();
     });
   }
 }
