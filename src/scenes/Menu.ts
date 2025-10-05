@@ -3,171 +3,179 @@ import { BackgroundManager } from '../components/Background';
 import { HEIGHT, WIDTH } from '../util/constants';
 
 export class Menu extends Scene {
-	background: GameObjects.Image;
-	wordmark: GameObjects.Image;
-	instruction: GameObjects.Text;
-	navigation: Array<{
-		key: string;
-		scene: string;
-	}>;
-	menu: GameObjects.Text[] = [];
-	selectedIndex = 0;
-	arrow: GameObjects.Image;
-	menuBackdrop?: GameObjects.Graphics;
-	backgroundManager: BackgroundManager;
+  background: GameObjects.Image;
+  wordmark: GameObjects.Image;
+  instruction: GameObjects.Text;
+  navigation: Array<{
+    key: string;
+    scene: string;
+  }>;
+  menu: GameObjects.Text[] = [];
+  selectedIndex = 0;
+  arrow: GameObjects.Image;
+  menuBackdrop?: GameObjects.Graphics;
+  backgroundManager: BackgroundManager;
 
-	unselectedSize = 64;
-	selectedSize = 80;
-	arrowOffset = 0;
-	menuLeft = 0;
+  unselectedSize = 64;
+  selectedSize = 80;
+  arrowOffset = 0;
+  menuLeft = 0;
 
-	constructor() {
-		super('Menu');
+  constructor() {
+    super('Menu');
 
-		this.navigation = [
-			{ key: 'START GAME', scene: 'Play' },
-			{ key: 'ABOUT', scene: 'About' },
-			{ key: 'CREDITS', scene: 'Credits' },
-		];
-	}
+    this.navigation = [
+      { key: 'START GAME', scene: 'Play' },
+      { key: 'ABOUT', scene: 'About' },
+      { key: 'CREDITS', scene: 'Credits' },
+    ];
+  }
 
-	create() {
-		this.backgroundManager = new BackgroundManager(this);
+  create() {
+    // Stop all music and play menu music
+    this.sound.stopAll();
+    const music = this.sound.add('instruments', { loop: true, volume: 0.5 });
+    music.play();
 
-		this.wordmark = this.add
-			.image(WIDTH / 2, HEIGHT / 4, 'wordmark')
-			.setDepth(3);
+    this.backgroundManager = new BackgroundManager(this);
 
-		const startY = HEIGHT / 2;
-		const lineHeight = 96;
+    this.wordmark = this.add
+      .image(WIDTH / 2, HEIGHT / 4, 'wordmark')
+      .setDepth(3);
 
-		const wordmarkBounds = this.wordmark.getBounds();
-		this.menuLeft = wordmarkBounds.left;
+    const startY = HEIGHT / 2;
+    const lineHeight = 96;
 
-		this.arrow = this.add
-			.image(this.menuLeft, startY, 'sword')
-			.setOrigin(0, 0.5)
-			.setDepth(7);
+    const wordmarkBounds = this.wordmark.getBounds();
+    this.menuLeft = wordmarkBounds.left;
 
-		this.arrow.setDisplaySize(this.selectedSize, this.selectedSize);
+    this.arrow = this.add
+      .image(this.menuLeft, startY, 'sword')
+      .setOrigin(0, 0.5)
+      .setDepth(7);
 
-		const arrowPadding = 16;
+    this.arrow.setDisplaySize(this.selectedSize, this.selectedSize);
 
-		const menuStartX =
-			this.menuLeft +
-			(this.arrow.displayWidth ?? this.arrow.width) +
-			arrowPadding;
+    const arrowPadding = 16;
 
-		this.navigation.forEach((item, i) => {
-			const menuText = this.add
-				.text(menuStartX, startY + i * lineHeight, item.key, {
-					fontFamily: 'Pixelify Sans',
-					fontSize: `${this.unselectedSize}px`,
-					color: '#1b1b1c',
-				})
-				.setOrigin(0, 0.5)
-				.setInteractive({ useHandCursor: true })
-				.setDepth(6);
+    const menuStartX =
+      this.menuLeft +
+      (this.arrow.displayWidth ?? this.arrow.width) +
+      arrowPadding;
 
-			menuText.on('pointerdown', () => this.activateIndex(i));
-			menuText.on('pointerover', () => this.setSelected(i));
+    this.navigation.forEach((item, i) => {
+      const menuText = this.add
+        .text(menuStartX, startY + i * lineHeight, item.key, {
+          fontFamily: 'Pixelify Sans',
+          fontSize: `${this.unselectedSize}px`,
+          color: '#1b1b1c',
+        })
+        .setOrigin(0, 0.5)
+        .setInteractive({ useHandCursor: true })
+        .setDepth(6);
 
-			this.menu.push(menuText);
-		});
+      menuText.on('pointerdown', () => this.activateIndex(i));
+      menuText.on('pointerover', () => this.setSelected(i));
 
-		this.menuBackdrop = this.add.graphics();
-		this.menuBackdrop.setDepth(4);
+      this.menu.push(menuText);
+    });
 
-		this.setSelected(0);
+    this.menuBackdrop = this.add.graphics();
+    this.menuBackdrop.setDepth(4);
 
-		this.input.keyboard?.on('keydown', (event: KeyboardEvent) => {
-			switch (event.code) {
-				case 'ArrowUp':
-				case 'KeyW':
-					this.moveSelection(-1);
-					break;
-				case 'ArrowDown':
-				case 'KeyS':
-					this.moveSelection(1);
-					break;
-				case 'Enter':
-				case 'Space':
-					this.activateIndex(this.selectedIndex);
-					break;
-			}
-		});
-	}
+    this.setSelected(0);
 
-	setSelected(index: number) {
-		this.selectedIndex = Phaser.Math.Clamp(index, 0, this.menu.length - 1);
-		this.menu.forEach((t, i) => {
-			t.setStyle({ color: '#ffffff' });
+    this.input.keyboard?.on('keydown', (event: KeyboardEvent) => {
+      switch (event.code) {
+        case 'ArrowUp':
+        case 'KeyW':
+          this.moveSelection(-1);
+          break;
+        case 'ArrowDown':
+        case 'KeyS':
+          this.moveSelection(1);
+          break;
+        case 'Enter':
+        case 'Space':
+          this.activateIndex(this.selectedIndex);
+          break;
+      }
+    });
+  }
 
-			if (i === this.selectedIndex) {
-				t.setFontSize(this.selectedSize);
-			} else {
-				t.setFontSize(this.unselectedSize);
-			}
-		});
+  setSelected(index: number) {
+    this.selectedIndex = Phaser.Math.Clamp(index, 0, this.menu.length - 1);
+    this.menu.forEach((t, i) => {
+      t.setStyle({ color: '#ffffff' });
 
-		const selected = this.menu[this.selectedIndex];
-		if (this.arrow && selected) {
-			this.arrow.setPosition(this.menuLeft, selected.y);
-			this.arrow.setDisplaySize(this.selectedSize, this.selectedSize);
-			this.arrow.setVisible(true);
-		}
+      if (i === this.selectedIndex) {
+        t.setFontSize(this.selectedSize);
+      } else {
+        t.setFontSize(this.unselectedSize);
+      }
+    });
 
-		this.updateMenuBackdrop();
-	}
+    const selected = this.menu[this.selectedIndex];
+    if (this.arrow && selected) {
+      this.arrow.setPosition(this.menuLeft, selected.y);
+      this.arrow.setDisplaySize(this.selectedSize, this.selectedSize);
+      this.arrow.setVisible(true);
+    }
 
-	updateMenuBackdrop() {
-		if (!this.menuBackdrop) return;
+    this.updateMenuBackdrop();
+  }
 
-		let minX = Number.POSITIVE_INFINITY;
-		let minY = Number.POSITIVE_INFINITY;
-		let maxX = Number.NEGATIVE_INFINITY;
-		let maxY = Number.NEGATIVE_INFINITY;
+  updateMenuBackdrop() {
+    if (!this.menuBackdrop) return;
 
-		this.menu.forEach((t) => {
-			const b = t.getBounds();
-			minX = Math.min(minX, b.left);
-			minY = Math.min(minY, b.top);
-			maxX = Math.max(maxX, b.right);
-			maxY = Math.max(maxY, b.bottom);
-		});
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
 
-		if (this.arrow) {
-			const ab = this.arrow.getBounds();
-			minX = Math.min(minX, ab.left);
-			minY = Math.min(minY, ab.top);
-			maxX = Math.max(maxX, ab.right);
-			maxY = Math.max(maxY, ab.bottom);
-		}
+    this.menu.forEach((t) => {
+      const b = t.getBounds();
+      minX = Math.min(minX, b.left);
+      minY = Math.min(minY, b.top);
+      maxX = Math.max(maxX, b.right);
+      maxY = Math.max(maxY, b.bottom);
+    });
 
-		const paddingX = Math.max(24, Math.floor(this.selectedSize * 0.6));
-		const paddingY = Math.max(12, Math.floor(this.selectedSize * 0.35));
+    if (this.arrow) {
+      const ab = this.arrow.getBounds();
+      minX = Math.min(minX, ab.left);
+      minY = Math.min(minY, ab.top);
+      maxX = Math.max(maxX, ab.right);
+      maxY = Math.max(maxY, ab.bottom);
+    }
 
-		const rectX = Math.max(8, minX - paddingX);
-		const rectY = Math.max(8, minY - paddingY);
-		const rectW = Math.min(WIDTH - 16, maxX - minX + paddingX * 2);
-		const rectH = Math.min(HEIGHT - 16, maxY - minY + paddingY * 2);
+    const paddingX = Math.max(24, Math.floor(this.selectedSize * 0.6));
+    const paddingY = Math.max(12, Math.floor(this.selectedSize * 0.35));
 
-		this.menuBackdrop.clear();
-		const backdropColor = 0x000000;
-		const backdropAlpha = 0.75;
-		this.menuBackdrop.fillStyle(backdropColor, backdropAlpha);
-		this.menuBackdrop.fillRoundedRect(rectX, rectY, rectW, rectH, 12);
-	}
+    const rectX = Math.max(8, minX - paddingX);
+    const rectY = Math.max(8, minY - paddingY);
+    const rectW = Math.min(WIDTH - 16, maxX - minX + paddingX * 2);
+    const rectH = Math.min(HEIGHT - 16, maxY - minY + paddingY * 2);
 
-	moveSelection(delta: number) {
-		const next =
-			(this.selectedIndex + delta + this.menu.length) % this.menu.length;
-		this.setSelected(next);
-	}
+    this.menuBackdrop.clear();
+    const backdropColor = 0x000000;
+    const backdropAlpha = 0.75;
+    this.menuBackdrop.fillStyle(backdropColor, backdropAlpha);
+    this.menuBackdrop.fillRoundedRect(rectX, rectY, rectW, rectH, 12);
+  }
 
-	activateIndex(i: number) {
-		const scene = this.navigation[i].scene;
+  moveSelection(delta: number) {
+    const next =
+      (this.selectedIndex + delta + this.menu.length) % this.menu.length;
+    this.setSelected(next);
+  }
 
-		if (scene) this.scene.switch(scene);
-	}
+  activateIndex(i: number) {
+    const scene = this.navigation[i].scene;
+
+    if (scene) {
+      this.sound.play('success', { volume: 0.6 });
+      this.scene.switch(scene);
+    }
+  }
 }
