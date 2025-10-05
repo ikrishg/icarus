@@ -7,7 +7,16 @@
 
 ## Play
 
-TODO: add `gif`
+[![](https://github.com/kkrishguptaa/icarus/raw/main/.github/gameplay.webp)](https://icarus.krishg.com)
+
+You can play the game on <a href="https://icarus.krishg.com">icarus.krishg.com</a>
+
+## Gallery
+
+|                                                                             |                                                                             |                                                                             |
+| --------------------------------------------------------------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| ![](https://github.com/kkrishguptaa/icarus/raw/main/.github/gallery/1.webp) | ![](https://github.com/kkrishguptaa/icarus/raw/main/.github/gallery/2.webp) | ![](https://github.com/kkrishguptaa/icarus/raw/main/.github/gallery/3.webp) |
+| ![](https://github.com/kkrishguptaa/icarus/raw/main/.github/gallery/4.webp) | ![](https://github.com/kkrishguptaa/icarus/raw/main/.github/gallery/5.webp) |                                                                             |
 
 ## Technologies
 
