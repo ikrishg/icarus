@@ -1,22 +1,22 @@
 {
-	"name": "icarus",
-	"description": "Fly too high and even thou shalt fall.",
-	"version": "0.7.0",
-	"repository": "kkrishguptaa/icarus",
-	"author": "Krish Gupta <m.krishggupta@icloud.com> (https://krishg.com/)",
-	"license": "MIT",
-	"homepage": "https://icarus.krishg.com",
-	"scripts": {
-		"dev": "bunx --bun vite --config vite/config.dev.mjs",
-		"build": "bunx --bun vite build --config vite/config.prod.mjs"
-	},
-	"devDependencies": {
-		"@types/bun": "1.2.23",
-		"terser": "5.44.0",
-		"typescript": "5.9.3",
-		"vite": "7.1.9"
-	},
-	"dependencies": {
-		"phaser": "^3.90.0"
-	}
+  "name": "icarus",
+  "description": "Fly too high and even thou shalt fall.",
+  "version": "0.7.1",
+  "repository": "kkrishguptaa/icarus",
+  "author": "Krish Gupta <m.krishggupta@icloud.com> (https://krishg.com/)",
+  "license": "MIT",
+  "homepage": "https://icarus.krishg.com",
+  "scripts": {
+    "dev": "bunx --bun vite --config vite/config.dev.mjs",
+    "build": "bunx --bun vite build --config vite/config.prod.mjs"
+  },
+  "devDependencies": {
+    "@types/bun": "1.2.23",
+    "terser": "5.44.0",
+    "typescript": "5.9.3",
+    "vite": "7.1.9"
+  },
+  "dependencies": {
+    "phaser": "^3.90.0"
+  }
 }
