@@ -1,6 +1,7 @@
 <div align="center">
 <img src="https://github.com/kkrishguptaa/icarus/raw/main/.github/icarus.png" alt="Icarus Logo" height="100"/>
 <h1>Icarus</h1>
+<p>🏆 WINNER DAYDREAM DELHI 🏆</p>
 <p>Fly too high and even thou shalt fall.</p>
 <p><a href="https://icarus.krishg.com">Play at icarus.krishg.com</a></p>
 </div>
