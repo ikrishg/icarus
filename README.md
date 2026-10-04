@@ -1,5 +1,5 @@
 <div align="center">
-<img src="https://github.com/kkrishguptaa/icarus/raw/main/.github/icarus.png" alt="Icarus Logo" height="100"/>
+<img src="https://github.com/ikrishg/icarus/raw/main/.github/icarus.png" alt="Icarus Logo" height="100"/>
 <h1>Icarus</h1>
 <p>🏆 WINNER DAYDREAM DELHI 🏆</p>
 <p>Fly too high and even thou shalt fall.</p>
@@ -8,7 +8,7 @@
 
 ## Play
 
-[![](https://github.com/kkrishguptaa/icarus/raw/main/.github/gameplay.webp)](https://icarus.krishg.com)
+[![](https://github.com/ikrishg/icarus/raw/main/.github/gameplay.webp)](https://icarus.krishg.com)
 
 You can play the game on <a href="https://icarus.krishg.com">icarus.krishg.com</a>
 
@@ -16,8 +16,8 @@ You can play the game on <a href="https://icarus.krishg.com">icarus.krishg.com</
 
 |                                                                             |                                                                             |                                                                             |
 | --------------------------------------------------------------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| ![](https://github.com/kkrishguptaa/icarus/raw/main/.github/gallery/1.webp) | ![](https://github.com/kkrishguptaa/icarus/raw/main/.github/gallery/2.webp) | ![](https://github.com/kkrishguptaa/icarus/raw/main/.github/gallery/3.webp) |
-| ![](https://github.com/kkrishguptaa/icarus/raw/main/.github/gallery/4.webp) | ![](https://github.com/kkrishguptaa/icarus/raw/main/.github/gallery/5.webp) |                                                                             |
+| ![](https://github.com/ikrishg/icarus/raw/main/.github/gallery/1.webp) | ![](https://github.com/ikrishg/icarus/raw/main/.github/gallery/2.webp) | ![](https://github.com/ikrishg/icarus/raw/main/.github/gallery/3.webp) |
+| ![](https://github.com/ikrishg/icarus/raw/main/.github/gallery/4.webp) | ![](https://github.com/ikrishg/icarus/raw/main/.github/gallery/5.webp) |                                                                             |
 
 ## Technologies
 
