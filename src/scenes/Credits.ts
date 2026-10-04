@@ -53,7 +53,7 @@ export class Credits extends Scene {
 				bodyY,
 				`Made by Krish Gupta (krishg.com).
 Read the readme on GitHub for more info on things such as assets.
-(kkrishguptaa/icarus)`,
+(ikrishg/icarus)`,
 				{
 					font: `${bodyFontSize}px Pixelify Sans`,
 					color: '#ffffff',
