@@ -151,7 +151,7 @@ Setup in `Play.setupCollisions()`:
 - **Changelog Job**: Uses conventional-changelog to generate version tag and changelog, creates PR, auto-merges
 - **Release Job**:
   1. Builds with `bun run build` (creates optimized `dist/` folder)
-  2. Uploads to itch.io using butler (`kkrishguptaa/icarus:default` channel)
+  2. Uploads to itch.io using butler (`ikrishg/icarus:default` channel)
   3. Creates GitHub release with zipped dist
 - **Requirements**: `BUTLER_API_KEY` secret for itch.io deployment
 
