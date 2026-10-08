@@ -14,13 +14,13 @@ interface IcarusSprite extends GameObjects.Sprite {
 
 export class BackgroundManager {
 	scene: Scene;
-	clouds: GameObjects.Image[] = [];
+	clouds: GameObjects.Sprite[] = [];
 	icarus?: GameObjects.Sprite;
 	icaruses: GameObjects.Sprite[] = [];
 	options: BackgroundOptions;
 
-	static readonly ICARUS_FRAME_WIDTH = 64;
-	static readonly ICARUS_FRAME_HEIGHT = 276;
+	static readonly ICARUS_FRAME_WIDTH = 52;
+	static readonly ICARUS_FRAME_HEIGHT = 56;
 
 	constructor(scene: Scene, options: BackgroundOptions = { icarus: true }) {
 		this.scene = scene;
@@ -46,22 +46,19 @@ export class BackgroundManager {
 
 	createClouds() {
 		const cloudCount = 6;
-		const cloudMinScale = 0.2;
-		const cloudMaxScale = 0.65;
 		const edgeMargin = Math.max(16, Math.floor(Math.min(WIDTH, HEIGHT) * 0.02));
 
 		for (let i = 0; i < cloudCount; i++) {
 			const cy = Phaser.Math.Between(20, Math.max(20, Math.floor(HEIGHT - 20)));
-			const scale = Phaser.Math.FloatBetween(cloudMinScale, cloudMaxScale);
 			const startX = Phaser.Math.Between(
 				-Math.floor(WIDTH - edgeMargin),
 				Math.floor(WIDTH - edgeMargin),
 			);
 			const cloud = this.scene.add
-				.image(startX, cy, 'cloud')
+				.sprite(startX, cy, 'cloud', Phaser.Math.Between(0, 2))
 				.setAlpha(0.9)
-				.setScale(scale)
-				.setDepth(0);
+				.setScale(6)
+				.setDepth(0.2);
 
 			const duration = Phaser.Math.Between(25000, 55000);
 
@@ -82,9 +79,7 @@ export class BackgroundManager {
 						edgeMargin,
 						Math.max(edgeMargin, Math.floor(HEIGHT - edgeMargin)),
 					);
-					cloud.setScale(
-						Phaser.Math.FloatBetween(cloudMinScale, cloudMaxScale),
-					);
+					cloud.setFrame(Phaser.Math.Between(0, 2));
 				},
 			});
 
@@ -93,16 +88,12 @@ export class BackgroundManager {
 	}
 
 	createIcarus() {
-		const icarusFrameStart = 0;
-		const icarusFrameEnd = 15;
-		const icarusDisplayHeight = 24;
-
 		if (!this.scene.anims.exists('icarus-fly')) {
 			this.scene.anims.create({
 				key: 'icarus-fly',
 				frames: this.scene.anims.generateFrameNumbers('icarus', {
-					start: icarusFrameStart,
-					end: icarusFrameEnd,
+					start: 10,
+					end: 13,
 				}),
 				frameRate: 8,
 				repeat: -1,
@@ -123,8 +114,7 @@ export class BackgroundManager {
 				.sprite(startX, baseY, 'icarus')
 				.setDepth(0.1 + i * 0.01) as IcarusSprite;
 
-			const scale = icarusDisplayHeight / BackgroundManager.ICARUS_FRAME_HEIGHT;
-			sprite.setScale(scale);
+			sprite.setScale(1).setAlpha(0.6);
 			sprite.play('icarus-fly');
 
 			// store in arrays; keep first sprite in `icarus` for compatibility

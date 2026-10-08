@@ -16,6 +16,7 @@ export class LevelManager {
 	portal: Phaser.GameObjects.Container;
 	fireballs: Fireball[] = [];
 	fireballTimers: Phaser.Time.TimerEvent[] = [];
+	lavaTimers: Phaser.Time.TimerEvent[] = [];
 
 	constructor(scene: Scene, levels: LevelDefinition[] = LEVELS) {
 		this.scene = scene;
@@ -64,6 +65,10 @@ export class LevelManager {
 			timer.remove();
 		});
 		this.fireballTimers = [];
+		this.lavaTimers.forEach((timer) => {
+			timer.remove();
+		});
+		this.lavaTimers = [];
 
 		const level = this.current;
 
@@ -203,57 +208,42 @@ export class LevelManager {
 					this.hazards.add(spike);
 				}
 			} else if (o.type === 'lava') {
-				// Create lava animation if it doesn't exist
-				if (!this.scene.anims.exists('lava-bubble')) {
-					this.scene.anims.create({
-						key: 'lava-bubble',
-						frames: this.scene.anims.generateFrameNumbers('lava', {
-							start: 0,
-							end: 7,
-						}),
-						frameRate: 8,
-						repeat: -1,
-					});
-				}
-
-				// Use a single lava sprite stretched to fit the entire area
-				const lavaOriginalWidth = 832; // from Boot.ts frameWidth
-				const lavaOriginalHeight = 192; // from Boot.ts frameHeight
-
-				const lava = this.scene.physics.add.sprite(o.x, o.y, 'lava', 0);
-				lava.setOrigin(0, 0);
-				lava.setDisplaySize(o.w, o.h);
-				lava.setDepth(6); // Above ground/platforms so lava stays visible
+				const lava = this.scene.add
+					.tileSprite(o.x, o.y, o.w, o.h, 'lava', 0)
+					.setOrigin(0)
+					.setTileScale(3);
+				lava.setDepth(6);
 				lava.setData('hazard', true);
 
-				// Set up physics body using original dimensions
-				// Phaser will automatically scale the body to match setDisplaySize
-				const body = lava.body as Phaser.Physics.Arcade.Body;
-				body.setSize(lavaOriginalWidth, lavaOriginalHeight);
-				body.setOffset(0, 0);
-				body.setAllowGravity(false);
-				body.setImmovable(true);
+				this.scene.physics.add.existing(lava, true);
+				const lavaBody = lava.body as Phaser.Physics.Arcade.StaticBody;
+				lavaBody.setSize(o.w, o.h);
+				lavaBody.updateFromGameObject();
+
+				let frame = 0;
+				const lavaTimer = this.scene.time.addEvent({
+					delay: 125,
+					callback: () => {
+						if (!lava.active) return;
+						frame = (frame + 1) % 4;
+						lava.setFrame(frame);
+					},
+					loop: true,
+				});
+				this.lavaTimers.push(lavaTimer);
 
 				this.visuals.add(lava);
 				this.hazards.add(lava);
-
-				// Play lava animation
-				lava.play('lava-bubble');
 			} else if (o.type === 'movingEnemy') {
-				// Use enemy sprite with physics
-				const enemyOriginalWidth = 336; // from Boot.ts frameWidth
-				const enemyOriginalHeight = 498; // from Boot.ts frameHeight
-
 				const enemy = this.scene.physics.add.sprite(o.x, o.y, 'enemy', 0);
 				enemy.setOrigin(0.5, 0.5);
-				enemy.setDisplaySize(o.w, o.h);
+				enemy.setScale(3);
 				enemy.setDepth(8);
 				enemy.setData('hazard', true);
 
-				// Set up physics body using original dimensions
 				const body = enemy.body as Phaser.Physics.Arcade.Body;
-				body.setSize(enemyOriginalWidth, enemyOriginalHeight);
-				body.setOffset(0, 0);
+				body.setSize(36, 58);
+				body.setOffset(2, 1);
 				body.setAllowGravity(false);
 				body.setImmovable(true);
 
@@ -266,7 +256,7 @@ export class LevelManager {
 						key: 'enemy-move',
 						frames: this.scene.anims.generateFrameNumbers('enemy', {
 							start: 0,
-							end: 7,
+							end: 5,
 						}),
 						frameRate: 10,
 						repeat: -1,
@@ -322,47 +312,48 @@ export class LevelManager {
 	}
 
 	createPortal(x: number, y: number) {
-		// Create portal animation if it doesn't exist
-		if (!this.scene.anims.exists('portal-spin')) {
-			this.scene.anims.create({
-				key: 'portal-spin',
-				frames: this.scene.anims.generateFrameNumbers('portal', {
-					start: 0,
-					end: 7,
-				}),
-				frameRate: 12,
-				repeat: -1,
-			});
-		}
+		const portalScale = 3;
 
-		// Portal should be 80% of player height
-		// Player visual height: 276px * 0.6 scale = 165.6px
-		// Portal target height: 165.6px * 0.8 = 132.5px
-		// Portal sprite original: 192x256
-		const portalScale = (276 * 0.6 * 0.8) / 256; // ~0.517
+		this.portal = this.scene.add.container(x, y).setDepth(9);
 
-		// Create portal sprite with physics - positioned to rest on platform
-		const portalSprite = this.scene.physics.add.sprite(x, y, 'portal', 0);
+		const glow = this.scene.add
+			.image(0, 0, 'portal')
+			.setOrigin(0.5, 1)
+			.setScale(portalScale)
+			.setTint(0xffdd00)
+			.setAlpha(0.15)
+			.setBlendMode(Phaser.BlendModes.ADD);
+
+		const portalSprite = this.scene.physics.add.sprite(0, 0, 'portal');
 		portalSprite.setScale(portalScale);
-		portalSprite.setOrigin(0.5, 1); // Bottom-center origin
-		portalSprite.setDepth(9);
-		portalSprite.play('portal-spin');
+		portalSprite.setOrigin(0.5, 1);
 
-		// Set up physics body to match full scaled sprite size
-		// The body size should match the original sprite dimensions before scaling
-		// Phaser will automatically apply the scale to the body
 		const body = portalSprite.body as Phaser.Physics.Arcade.Body;
-		body.setSize(192, 256); // Use original sprite dimensions
-		// With origin (0.5, 1) and no offset, body is already centered and at bottom
-		body.setOffset(0, 0);
+		body.setSize(30, 44);
+		body.setOffset(1, 0);
 		body.setAllowGravity(false);
 		body.setImmovable(true);
 
-		// Wrap in container for compatibility with existing code
-		this.portal = this.scene.add.container(x, y).setDepth(9);
-		// Adjust sprite position since container is already at x,y
-		portalSprite.setPosition(x - x, y - y); // Reset to 0,0 relative
+		this.portal.add(glow);
 		this.portal.add(portalSprite);
 		this.visuals.add(this.portal);
+
+		this.scene.tweens.add({
+			targets: glow,
+			alpha: { from: 0.15, to: 0.4 },
+			duration: 600,
+			yoyo: true,
+			repeat: -1,
+			ease: 'Sine.easeInOut',
+		});
+
+		this.scene.tweens.add({
+			targets: portalSprite,
+			scale: { from: portalScale, to: 3.18 },
+			duration: 600,
+			yoyo: true,
+			repeat: -1,
+			ease: 'Sine.easeInOut',
+		});
 	}
 }

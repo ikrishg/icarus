@@ -44,26 +44,20 @@ export class Player {
 		this.scene = scene;
 		this.abilityManager = abilityManager;
 
-		// Create player sprite using Icarus spritesheet (2x size)
-		// Original sprite is 256x276, with 2x scale at 0.6 = ~154x166 pixels
 		this.sprite = this.scene.physics.add
 			.sprite(x, y, 'icarus')
-			.setScale(0.6) // 2x scale for consistency
+			.setScale(3)
 			.setDepth(10);
 
-		// Play the flying animation
-		this.sprite.play('player-fly');
+		this.sprite.play('player-idle');
 
 		// Set collision properties
 		this.sprite.setBounce(0.1);
 		this.sprite.setCollideWorldBounds(true);
 
-		// Set body size for better collision detection
-		// Scaled sprite is ~154x166 pixels
-		// Make hitbox slightly smaller for better gameplay (~80% of visual size)
 		const body = this.sprite.body as Phaser.Physics.Arcade.Body;
-		body.setSize(120, 140); // Proper 2x hitbox
-		body.setOffset(68, 63); // Center the hitbox on the sprite
+		body.setSize(24, 44);
+		body.setOffset(15, 12);
 
 		// Setup keyboard controls
 		this.cursors = this.scene.input.keyboard?.createCursorKeys();
@@ -117,13 +111,14 @@ export class Player {
 		}
 
 		// Handle dash
-		if (this.isDashing) {
-			this.sprite.setVelocityX(this.DASH_SPEED * this.dashDirection);
-			return; // Skip normal movement during dash
-		}
-
 		const moveSpeed = this.abilityManager.getMoveSpeed();
 		const canMoveLeft = this.abilityManager.abilities.canMoveLeft;
+
+		if (this.isDashing) {
+			this.sprite.setVelocityX(this.DASH_SPEED * this.dashDirection);
+			this.updatePlayerAnimation(body, canMoveLeft);
+			return; // Skip normal movement during dash
+		}
 
 		// Horizontal movement
 		if ((this.cursors?.left.isDown || this.wasd?.left.isDown) && canMoveLeft) {
@@ -167,9 +162,29 @@ export class Player {
 			}
 		}
 
+		this.updatePlayerAnimation(body, canMoveLeft);
+
 		// Slight rotation based on vertical velocity for better feel
 		const rotation = Phaser.Math.Clamp(body.velocity.y * 0.0003, -0.2, 0.2);
 		this.sprite.setRotation(rotation);
+	}
+
+	private updatePlayerAnimation(
+		body: Phaser.Physics.Arcade.Body,
+		canMoveLeft: boolean,
+	) {
+		const movingHorizontally =
+			this.cursors?.right.isDown ||
+			this.wasd?.right.isDown ||
+			((this.cursors?.left.isDown || this.wasd?.left.isDown) && canMoveLeft);
+
+		if (!body.touching.down) {
+			this.sprite.anims.play('player-flap', true);
+		} else if (movingHorizontally) {
+			this.sprite.anims.play('player-run', true);
+		} else {
+			this.sprite.anims.play('player-idle', true);
+		}
 	}
 
 	performDash() {
@@ -221,7 +236,7 @@ export class Player {
 		this.sprite.clearTint();
 		this.sprite.setRotation(0);
 		this.sprite.setAngularVelocity(0);
-		this.sprite.play('player-fly');
+		this.sprite.play('player-idle');
 		this.setPosition(x, y);
 	}
 
