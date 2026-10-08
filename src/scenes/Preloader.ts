@@ -81,7 +81,10 @@ export class Preloader extends Scene {
 		// Load all game assets
 		this.load.image('background', 'assets/sky.webp');
 		this.load.image('wordmark', 'assets/wordmark.webp');
-		this.load.image('cloud', 'assets/cloud.webp');
+		this.load.spritesheet('cloud', 'assets/cloud.webp', {
+			frameWidth: 48,
+			frameHeight: 20,
+		});
 		this.load.image('bow', 'assets/bow.webp');
 		this.load.image('dash', 'assets/dash.webp');
 		this.load.image('flight', 'assets/flight.webp');
@@ -89,32 +92,29 @@ export class Preloader extends Scene {
 		this.load.image('vision', 'assets/eyes.webp');
 		this.load.image('left', 'assets/left.webp');
 		this.load.spritesheet('icarus', 'assets/icarus.webp', {
-			frameWidth: 256,
-			frameHeight: 276,
+			frameWidth: 52,
+			frameHeight: 56,
 		});
 		this.load.spritesheet('ground', 'assets/ground.webp', {
 			frameWidth: 448,
 			frameHeight: 162,
 		});
 		this.load.spritesheet('lava', 'assets/lava.webp', {
-			frameWidth: 832,
-			frameHeight: 192,
+			frameWidth: 32,
+			frameHeight: 27,
 		});
 		this.load.spritesheet('spikes', 'assets/spikes.webp', {
 			frameWidth: 402,
 			frameHeight: 129,
 		});
 		this.load.spritesheet('enemy', 'assets/enemy.webp', {
-			frameWidth: 336,
-			frameHeight: 498,
+			frameWidth: 40,
+			frameHeight: 59,
 		});
-		this.load.spritesheet('portal', 'assets/portal.webp', {
-			frameWidth: 192,
-			frameHeight: 256,
-		});
+		this.load.image('portal', 'assets/portal.webp');
 		this.load.spritesheet('fireball', 'assets/fireball.webp', {
-			frameWidth: 192,
-			frameHeight: 194,
+			frameWidth: 32,
+			frameHeight: 32,
 		});
 		this.load.spritesheet('arrow', 'assets/arrow.webp', {
 			frameWidth: 224,
@@ -134,12 +134,34 @@ export class Preloader extends Scene {
 
 	create() {
 		// Create animations
-		if (!this.anims.exists('player-fly')) {
+		if (!this.anims.exists('player-idle')) {
 			this.anims.create({
-				key: 'player-fly',
+				key: 'player-idle',
 				frames: this.anims.generateFrameNumbers('icarus', {
 					start: 0,
-					end: 15,
+					end: 3,
+				}),
+				frameRate: 6,
+				repeat: -1,
+			});
+		}
+		if (!this.anims.exists('player-run')) {
+			this.anims.create({
+				key: 'player-run',
+				frames: this.anims.generateFrameNumbers('icarus', {
+					start: 4,
+					end: 9,
+				}),
+				frameRate: 12,
+				repeat: -1,
+			});
+		}
+		if (!this.anims.exists('player-flap')) {
+			this.anims.create({
+				key: 'player-flap',
+				frames: this.anims.generateFrameNumbers('icarus', {
+					start: 10,
+					end: 13,
 				}),
 				frameRate: 12,
 				repeat: -1,
