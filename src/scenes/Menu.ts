@@ -50,11 +50,11 @@ export class Menu extends Scene {
 		this.menuLeft = wordmarkBounds.left;
 
 		this.arrow = this.add
-			.image(this.menuLeft, startY, 'sword')
+			.image(this.menuLeft, startY, 'arrow')
 			.setOrigin(0, 0.5)
 			.setDepth(7);
 
-		this.arrow.setDisplaySize(this.selectedSize, this.selectedSize);
+		this.arrow.setScale(this.selectedSize / 224);
 
 		const arrowPadding = 16;
 
@@ -118,7 +118,7 @@ export class Menu extends Scene {
 		const selected = this.menu[this.selectedIndex];
 		if (this.arrow && selected) {
 			this.arrow.setPosition(this.menuLeft, selected.y);
-			this.arrow.setDisplaySize(this.selectedSize, this.selectedSize);
+			this.arrow.setScale(this.selectedSize / 224);
 			this.arrow.setVisible(true);
 		}
 

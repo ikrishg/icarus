@@ -188,11 +188,14 @@ export class LevelManager {
 					spike.setDepth(6);
 					spike.setData('hazard', true);
 
-					// Set up physics body to match full sprite size
-					// Use original dimensions - Phaser applies scale automatically
+					// Trim hitbox to visible spike tips (lower 70%, inner 80% of frame)
+					const hitW = spikeOriginalWidth * 0.8;
+					const hitH = spikeOriginalHeight * 0.7;
+					const hitOffsetX = spikeOriginalWidth * 0.1;
+					const hitOffsetY = spikeOriginalHeight * 0.3;
 					const body = spike.body as Phaser.Physics.Arcade.Body;
-					body.setSize(spikeOriginalWidth, spikeOriginalHeight);
-					body.setOffset(0, 0);
+					body.setSize(hitW, hitH);
+					body.setOffset(hitOffsetX, hitOffsetY);
 					body.setAllowGravity(false);
 					body.setImmovable(true);
 
@@ -220,7 +223,7 @@ export class LevelManager {
 				const lava = this.scene.physics.add.sprite(o.x, o.y, 'lava', 0);
 				lava.setOrigin(0, 0);
 				lava.setDisplaySize(o.w, o.h);
-				lava.setDepth(3); // Below platforms
+				lava.setDepth(6); // Above ground/platforms so lava stays visible
 				lava.setData('hazard', true);
 
 				// Set up physics body using original dimensions
