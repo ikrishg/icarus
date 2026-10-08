@@ -5,6 +5,47 @@ import { LevelManager } from '../components/LevelManager';
 import { Player } from '../components/Player';
 import type { PlayerAbilities } from '../util/types';
 
+const ABILITY_CARD_FILL = 0xd6c9b6;
+const ABILITY_CARD_INK = 0x442d32;
+const ABILITY_CARD_GOLD = 0xffdd00;
+const ABILITY_ICON_MAX = 120;
+
+function abilityGridStartX(
+	canvasWidth: number,
+	cols: number,
+	boxSize: number,
+	spacing: number,
+): number {
+	const gridWidth = cols * boxSize + (cols - 1) * spacing;
+	return (canvasWidth - gridWidth) / 2 + boxSize / 2;
+}
+
+function addAbilityIcon(
+	scene: Scene,
+	x: number,
+	y: number,
+	textureKey: string,
+): Phaser.GameObjects.Image {
+	const frame = scene.textures.get(textureKey).get();
+	const scale = Math.min(
+		ABILITY_ICON_MAX / frame.width,
+		ABILITY_ICON_MAX / frame.height,
+	);
+	return scene.add.image(x, y - 40, textureKey).setScale(scale).setDepth(22);
+}
+
+function styleAbilityCard(
+	button: Phaser.GameObjects.Rectangle,
+	selected: boolean,
+): void {
+	button.setFillStyle(ABILITY_CARD_FILL);
+	button.setStrokeStyle(
+		selected ? 6 : 3,
+		selected ? ABILITY_CARD_GOLD : ABILITY_CARD_INK,
+		1,
+	);
+}
+
 export class Play extends Scene {
 	backgroundManager: BackgroundManager;
 	levelManager: LevelManager;
@@ -352,7 +393,7 @@ export class Play extends Scene {
 			.text(this.cameras.main.width / 2, 80, 'Choose an ability to lose:', {
 				fontFamily: 'Pixelify Sans',
 				fontSize: '64px',
-				color: '#ff4444',
+				color: '#e9591c',
 				stroke: '#000000',
 				strokeThickness: 8,
 				align: 'center',
@@ -373,11 +414,16 @@ export class Play extends Scene {
 			{ key: 'canShootArrows', icon: 'bow', effect: 'Cannot shoot arrows' },
 		];
 
-		const startX = 240;
 		const startY = 320;
 		const boxSize = 280;
 		const spacing = 40;
 		const cols = 3;
+		const startX = abilityGridStartX(
+			this.cameras.main.width,
+			cols,
+			boxSize,
+			spacing,
+		);
 
 		let buttonIndex = 0;
 		const buttons: Phaser.GameObjects.Rectangle[] = [];
@@ -401,9 +447,8 @@ export class Play extends Scene {
 			const x = startX + col * (boxSize + spacing);
 			const y = startY + row * (boxSize + spacing);
 
-			// Create button background
 			const button = this.add
-				.rectangle(x, y, boxSize, boxSize, 0x333333)
+				.rectangle(x, y, boxSize, boxSize, ABILITY_CARD_FILL)
 				.setDepth(21)
 				.setInteractive()
 				.setData('abilityKey', data.key)
@@ -415,13 +460,10 @@ export class Play extends Scene {
 					selectAbility();
 				});
 
+			styleAbilityCard(button, false);
 			buttons.push(button);
 
-			// Add icon
-			this.add
-				.image(x, y - 40, data.icon)
-				.setDisplaySize(120, 120)
-				.setDepth(22);
+			addAbilityIcon(this, x, y, data.icon);
 
 			// Add ability name
 			this.add
@@ -453,11 +495,7 @@ export class Play extends Scene {
 		// Function to update visual selection
 		const updateSelection = () => {
 			buttons.forEach((btn, i) => {
-				if (i === selectedIndex) {
-					btn.setFillStyle(0x555555);
-				} else {
-					btn.setFillStyle(0x333333);
-				}
+				styleAbilityCard(btn, i === selectedIndex);
 			});
 		};
 
@@ -601,7 +639,7 @@ export class Play extends Scene {
 			.text(this.cameras.main.width / 2, 80, titleText, {
 				fontFamily: 'Pixelify Sans',
 				fontSize: '64px',
-				color: '#44ff44',
+				color: '#afa843',
 				stroke: '#000000',
 				strokeThickness: 8,
 				align: 'center',
@@ -609,11 +647,16 @@ export class Play extends Scene {
 			.setOrigin(0.5)
 			.setDepth(21);
 
-		const startX = 240;
 		const startY = 320;
 		const boxSize = 280;
 		const spacing = 40;
 		const cols = 3;
+		const startX = abilityGridStartX(
+			this.cameras.main.width,
+			cols,
+			boxSize,
+			spacing,
+		);
 
 		let selectedAbilities = 0;
 		let buttonIndex = 0;
@@ -628,9 +671,8 @@ export class Play extends Scene {
 			const x = startX + col * (boxSize + spacing);
 			const y = startY + row * (boxSize + spacing);
 
-			// Create button background
 			const button = this.add
-				.rectangle(x, y, boxSize, boxSize, 0x224422)
+				.rectangle(x, y, boxSize, boxSize, ABILITY_CARD_FILL)
 				.setDepth(21)
 				.setInteractive()
 				.setData('abilityKey', data.key)
@@ -646,13 +688,10 @@ export class Play extends Scene {
 					selectAbility();
 				});
 
+			styleAbilityCard(button, false);
 			buttons.push(button);
 
-			// Add icon
-			this.add
-				.image(x, y - 40, data.icon)
-				.setDisplaySize(120, 120)
-				.setDepth(22);
+			addAbilityIcon(this, x, y, data.icon);
 
 			// Add ability name
 			this.add
@@ -672,12 +711,8 @@ export class Play extends Scene {
 		// Function to update visual selection
 		const updateSelection = () => {
 			buttons.forEach((btn, i) => {
-				if (btn.getData('selected')) return; // Don't change already selected
-				if (i === selectedIndex) {
-					btn.setFillStyle(0x336633);
-				} else {
-					btn.setFillStyle(0x224422);
-				}
+				if (btn.getData('selected')) return;
+				styleAbilityCard(btn, i === selectedIndex);
 			});
 		};
 
@@ -697,7 +732,8 @@ export class Play extends Scene {
 				this.abilityManager.abilities[abilityKey] = true as never;
 			}
 
-			button.setFillStyle(0x44ff44);
+			button.setFillStyle(0xafa843);
+			button.setStrokeStyle(3, ABILITY_CARD_INK, 1);
 			button.setData('selected', true);
 			selectedAbilities++;
 

@@ -20,7 +20,7 @@ export class BackgroundManager {
 	options: BackgroundOptions;
 
 	static readonly ICARUS_FRAME_WIDTH = 64;
-	static readonly ICARUS_FRAME_HEIGHT = 69;
+	static readonly ICARUS_FRAME_HEIGHT = 276;
 
 	constructor(scene: Scene, options: BackgroundOptions = { icarus: true }) {
 		this.scene = scene;
