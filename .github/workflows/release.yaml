@@ -89,7 +89,7 @@ jobs:
       - name: Push to itch.io
         id: itchio
         run: |
-          ./butler push dist kkrishguptaa/icarus:default --userversion ${{ needs.changelog.outputs.tag }} --if-changed
+          ./butler push dist ikrishg/icarus:default --userversion ${{ needs.changelog.outputs.tag }} --if-changed
         env:
           BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
 
