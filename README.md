@@ -46,10 +46,9 @@ Abilities: Flight, Vision, Shoot, Dash, Movement
 
 ### Art and Sprites
 
-- `sky.webp` (background) — krish gupta.
-- `cloud.webp` — somewhere on the internet
-- `sword.webp` — somewhere on the internet
-- `*.webp` — chatgpt (prompt engineering: krish gupta!!)
+- `sky.webp` (background) — Krish Gupta
+- Pixel art sprites (`icarus`, `enemy`, `fireball`, `lava`, `portal`, `cloud`), logo (`.github/icarus.png`), and favicons — Krish Gupta
+- `*.webp` (ability icons, ground, spikes, arrow, wordmark) — ChatGPT (prompt engineering: Krish Gupta)
 
 ### Music
 

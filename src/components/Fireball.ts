@@ -11,12 +11,12 @@ export class Fireball {
 		// Create fireball sprite
 		this.sprite = this.scene.physics.add
 			.sprite(x, y, 'fireball')
-			.setScale(0.5)
+			.setScale(3)
 			.setDepth(8);
 
 		// Set physics
 		const body = this.sprite.body as Phaser.Physics.Arcade.Body;
-		body.setSize(192, 194);
+		body.setCircle(9, 7, 13);
 		body.setAllowGravity(false);
 		body.setVelocityY(this.FALL_SPEED);
 
@@ -26,7 +26,7 @@ export class Fireball {
 				key: 'fireball-fall',
 				frames: this.scene.anims.generateFrameNumbers('fireball', {
 					start: 0,
-					end: 7,
+					end: 3,
 				}),
 				frameRate: 12,
 				repeat: -1,
