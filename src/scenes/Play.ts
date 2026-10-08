@@ -7,6 +7,8 @@ import type { PlayerAbilities } from '../util/types';
 
 const ABILITY_CARD_FILL = 0xd6c9b6;
 const ABILITY_CARD_INK = 0x442d32;
+const ABILITY_CARD_INK_HEX = `#${ABILITY_CARD_INK.toString(16).padStart(6, '0')}`;
+const ABILITY_LOSS_EFFECT_HEX = '#8b3333';
 const ABILITY_CARD_GOLD = 0xffdd00;
 const ABILITY_ICON_MAX = 120;
 
@@ -470,7 +472,7 @@ export class Play extends Scene {
 				.text(x, y + 60, this.abilityManager.getAbilityDescription(data.key), {
 					fontFamily: 'Pixelify Sans',
 					fontSize: '28px',
-					color: '#ffffff',
+					color: ABILITY_CARD_INK_HEX,
 					align: 'center',
 					wordWrap: { width: boxSize - 20 },
 				})
@@ -482,7 +484,7 @@ export class Play extends Scene {
 				.text(x, y + 110, data.effect, {
 					fontFamily: 'Pixelify Sans',
 					fontSize: '20px',
-					color: '#ff8888',
+					color: ABILITY_LOSS_EFFECT_HEX,
 					align: 'center',
 					wordWrap: { width: boxSize - 20 },
 				})
@@ -698,7 +700,7 @@ export class Play extends Scene {
 				.text(x, y + 80, this.abilityManager.getAbilityDescription(data.key), {
 					fontFamily: 'Pixelify Sans',
 					fontSize: '28px',
-					color: '#ffffff',
+					color: ABILITY_CARD_INK_HEX,
 					align: 'center',
 					wordWrap: { width: boxSize - 20 },
 				})
