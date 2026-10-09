@@ -1,7 +1,7 @@
 {
   "name": "icarus",
   "description": "Fly too high and even thou shalt fall.",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "repository": "ikrishg/icarus",
   "author": "Krish Gupta <m.krishggupta@icloud.com> (https://krishg.com/)",
   "license": "MIT",
