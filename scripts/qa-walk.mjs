@@ -1,13 +1,46 @@
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { chromium, devices } from 'playwright';
 import { startStaticServer } from './static-server.mjs';
 
-async function bootToPlay(page, baseUrl) {
-	await page.goto(baseUrl);
+const ARTIFACT_SCREENSHOTS = '/opt/cursor/artifacts/screenshots';
+
+async function bootToPlay(page, baseUrl, search = '') {
+	const url = search ? `${baseUrl}${search.startsWith('?') ? search : `?${search}`}` : baseUrl;
+	await page.goto(url);
 	await page.waitForTimeout(3000);
 	await page.keyboard.press('Enter');
 	await page.waitForTimeout(700);
 	await page.keyboard.press('Enter');
 	await page.waitForTimeout(2000);
+}
+
+async function bootToAbout(page, baseUrl) {
+	await page.goto(baseUrl);
+	await page.waitForFunction(() => window.__icarusGame?.scene != null);
+	await page.waitForTimeout(1500);
+	await page.evaluate(() => {
+		const game = window.__icarusGame;
+		game?.scene.start('About');
+	});
+	await page.waitForFunction(() => window.__icarusGame?.scene.isActive('About') === true);
+	await page.waitForTimeout(500);
+	try {
+		mkdirSync(ARTIFACT_SCREENSHOTS, { recursive: true });
+		await page.screenshot({
+			path: join(ARTIFACT_SCREENSHOTS, 'about-ligatures-prod.png'),
+			fullPage: true,
+		});
+	} catch {
+		// optional in local runs
+	}
+}
+
+async function getLevelIndex(page) {
+	return page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		return play?.levelManager?.currentIndex ?? -1;
+	});
 }
 
 async function getLevelTitle(page) {
@@ -35,25 +68,97 @@ async function getPlayerPos(page) {
 	});
 }
 
-async function tapTouchTarget(page, target) {
-	const point = await page.evaluate((t) => {
-		const game = window.__icarusGame;
-		const play = game?.scene.getScene('Play');
-		const coords = play?.touchControls?.tapTargets?.[t];
-		if (!coords || !game?.canvas) return null;
-		const sm = game.scale;
-		const rect = game.canvas.getBoundingClientRect();
-		const scale = sm.displaySize.width / sm.width;
-		const offsetX = rect.left + (rect.width - sm.displaySize.width) / 2;
-		const offsetY = rect.top + (rect.height - sm.displaySize.height) / 2;
-		return {
-			x: offsetX + coords.x * scale,
-			y: offsetY + coords.y * scale,
-		};
-	}, target);
-	if (!point) return false;
-	await page.touchscreen.tap(point.x, point.y);
+async function teleportToGoal(page) {
+	return page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const goal = play?.levelManager?.current?.goal;
+		const sprite = play?.player?.sprite;
+		if (!play || !goal || !sprite?.body) return false;
+		const x = goal.x;
+		const y = goal.y - 24;
+		sprite.setPosition(x, y);
+		sprite.body.reset(x, y);
+		sprite.body.updateFromGameObject();
+		return true;
+	});
+}
+
+async function waitForPortalAdvance(page, startIndex, timeoutMs = 10000) {
+	try {
+		await page.waitForFunction(
+			(idx) => {
+				const play = window.__icarusGame?.scene.getScene('Play');
+				if (!play) return false;
+				if ((play.levelManager?.currentIndex ?? 0) > idx) return true;
+				return play.children.list.some(
+					(c) =>
+						c.type === 'Text' &&
+						c.depth === 21 &&
+						typeof c.text === 'string' &&
+						c.text.includes('Choose'),
+				);
+			},
+			startIndex,
+			{ timeout: timeoutMs },
+		);
+	} catch {
+		return false;
+	}
 	return true;
+}
+
+async function dismissAbilityModals(page, startIndex) {
+	for (let i = 0; i < 12; i++) {
+		const idx = await getLevelIndex(page);
+		if (idx > startIndex) return true;
+
+		const hasModal = await page.evaluate(() => {
+			const play = window.__icarusGame?.scene.getScene('Play');
+			return play?.children.list.some(
+				(c) =>
+					c.type === 'Text' &&
+					c.depth === 21 &&
+					typeof c.text === 'string' &&
+					c.text.includes('Choose'),
+			);
+		});
+		if (!hasModal) {
+			await page.waitForTimeout(300);
+			continue;
+		}
+		await page.keyboard.press('Enter');
+		await page.waitForTimeout(700);
+	}
+	return (await getLevelIndex(page)) > startIndex;
+}
+
+async function advanceLevelsViaPortal(page, count) {
+	const advanced = [];
+	for (let step = 0; step < count; step++) {
+		const startIndex = await getLevelIndex(page);
+		if (startIndex < 0) {
+			advanced.push(false);
+			break;
+		}
+		await page.locator('canvas').click();
+		const teleported = await teleportToGoal(page);
+		if (!teleported) {
+			advanced.push(false);
+			break;
+		}
+		for (let frame = 0; frame < 8; frame++) {
+			await page.waitForTimeout(50);
+		}
+		const sawAdvance = await waitForPortalAdvance(page, startIndex);
+		if (!sawAdvance) {
+			advanced.push(false);
+			break;
+		}
+		const cleared = await dismissAbilityModals(page, startIndex);
+		const endIndex = await getLevelIndex(page);
+		advanced.push(cleared && endIndex === startIndex + 1);
+	}
+	return advanced;
 }
 
 async function runDesktop(baseUrl) {
@@ -84,15 +189,59 @@ async function runDesktop(baseUrl) {
 		colliders.push(await getColliderCount(page));
 	}
 
+	const portalAdvanceDesktop = await advanceLevelsViaPortal(page, 5);
+
 	await browser.close();
 	return {
 		level1Title,
 		colliderAtL1,
 		playerXAfterWalk,
 		cheatSkipped,
+		portalAdvanceDesktop,
+		portalLevelsPassed: portalAdvanceDesktop.every(Boolean),
 		colliders,
 		stuckOnGround: playerXAfterWalk < 380,
 	};
+}
+
+async function runDebugCheat(baseUrl) {
+	const browser = await chromium.launch();
+	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+	await bootToPlay(page, baseUrl, '?debug=1');
+	const level1Title = await getLevelTitle(page);
+	await page.locator('canvas').click();
+	await page.keyboard.press('Semicolon');
+	await page.waitForTimeout(900);
+	const levelAfterCheat = await getLevelTitle(page);
+	await browser.close();
+	return {
+		debugCheatSkipped: levelAfterCheat !== level1Title,
+		level1Title,
+		levelAfterCheat,
+	};
+}
+
+async function runAboutLigatures(baseUrl) {
+	const browser = await chromium.launch();
+	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+	await bootToAbout(page, baseUrl);
+	const aboutText = await page.evaluate(() => {
+		const about = window.__icarusGame?.scene.getScene('About');
+		const body = about?.creditsBody;
+		if (body?.text) return body.text;
+		const list = about?.children?.list ?? [];
+		for (const child of list) {
+			if (child.type === 'Text' && typeof child.text === 'string' && child.text.includes('Icarus')) {
+				return child.text;
+			}
+		}
+		return '';
+	});
+	await browser.close();
+	const hasLigatureFix =
+		aboutText.includes('\u200C') &&
+		(aboutText.includes('f\u200Cly') || aboutText.includes('F\u200Cly'));
+	return { hasLigatureFix, aboutTextLength: aboutText.length };
 }
 
 async function runMobile(baseUrl) {
@@ -179,12 +328,27 @@ async function runMobile(baseUrl) {
 		await page.mouse.up();
 	}
 
+	const startIndex = await getLevelIndex(page);
+	await page.locator('canvas').click({ force: true });
+	const teleported = await teleportToGoal(page);
+	for (let frame = 0; frame < 8; frame++) {
+		await page.waitForTimeout(50);
+	}
+	const sawAdvance = await waitForPortalAdvance(page, startIndex);
+	let portalMobileLevel2 = false;
+	if (teleported && sawAdvance) {
+		portalMobileLevel2 = await dismissAbilityModals(page, startIndex);
+		portalMobileLevel2 =
+			portalMobileLevel2 && (await getLevelIndex(page)) === startIndex + 1;
+	}
+
 	await browser.close();
 	return {
 		widthRatio,
 		touchButtonCount,
 		touchMoveWorked,
 		touchJumpWorked,
+		portalMobileLevel2,
 		canvasInPlay,
 		viewport,
 	};
@@ -193,6 +357,8 @@ async function runMobile(baseUrl) {
 async function main() {
 	const { server, baseUrl } = await startStaticServer();
 	const desktop = await runDesktop(baseUrl);
+	const debug = await runDebugCheat(baseUrl);
+	const about = await runAboutLigatures(baseUrl);
 	const mobile = await runMobile(baseUrl);
 	server.close();
 
@@ -201,6 +367,10 @@ async function main() {
 	);
 	const pass =
 		!desktop.cheatSkipped &&
+		debug.debugCheatSkipped &&
+		desktop.portalLevelsPassed &&
+		mobile.portalMobileLevel2 &&
+		about.hasLigatureFix &&
 		!desktop.stuckOnGround &&
 		collidersStable &&
 		mobile.widthRatio > 0.85 &&
@@ -208,7 +378,7 @@ async function main() {
 		mobile.touchMoveWorked &&
 		mobile.touchJumpWorked;
 
-	console.log(JSON.stringify({ desktop, mobile, pass }, null, 2));
+	console.log(JSON.stringify({ desktop, debug, about, mobile, pass }, null, 2));
 	process.exit(pass ? 0 : 1);
 }
 
