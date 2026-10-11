@@ -1,6 +1,8 @@
 import { type GameObjects, Scene } from 'phaser';
 import { BackgroundManager } from '../components/Background';
 import { HEIGHT, WIDTH } from '../util/constants';
+import { PALETTE, PALETTE_HEX } from '../util/palette';
+import { sanitizePixelFont } from '../util/text';
 
 export class Win extends Scene {
 	backgroundManager: BackgroundManager;
@@ -8,26 +10,24 @@ export class Win extends Scene {
 	winBody!: GameObjects.Text;
 	backdrop!: GameObjects.Rectangle;
 	keyHints!: GameObjects.Text;
-	totalLevels = 0;
+	giftsLost = 0;
 
 	constructor() {
 		super('Win');
 	}
 
-	init(data: { totalLevels: number }) {
-		this.totalLevels = data.totalLevels || 0;
+	init(data: { giftsLost?: number }) {
+		this.giftsLost = data.giftsLost ?? 0;
 	}
 
 	create() {
-		// Stop all music
 		this.sound.stopAll();
 
 		this.backgroundManager = new BackgroundManager(this);
 
 		this.backdrop = this.add
-			.rectangle(0, 0, WIDTH, HEIGHT, 0x000000)
+			.rectangle(0, 0, WIDTH, HEIGHT, PALETTE.deep, 0.92)
 			.setOrigin(0, 0)
-			.setAlpha(0.85)
 			.setDepth(3);
 
 		const headlineFontSize = 128;
@@ -39,33 +39,26 @@ export class Win extends Scene {
 		const hintsY = HEIGHT - 100;
 
 		this.winHeadline = this.add
-			.text(WIDTH / 2, headlineY, '🎉 VICTORY! 🎉', {
+			.text(WIDTH / 2, headlineY, 'YOU REACHED THE SUN', {
 				font: `${headlineFontSize}px Pixelify Sans`,
-				color: '#ffdd00',
+				color: PALETTE_HEX.sunGold,
+				stroke: PALETTE_HEX.deep,
+				strokeThickness: 6,
 				align: 'center',
 			})
 			.setOrigin(0.5)
-			.setShadow(6, 6, '#000000', 8)
 			.setDepth(4);
-
-		// Add pulsing animation
-		this.tweens.add({
-			targets: this.winHeadline,
-			scale: { from: 0.95, to: 1.05 },
-			duration: 1500,
-			yoyo: true,
-			repeat: -1,
-			ease: 'Sine.easeInOut',
-		});
 
 		this.winBody = this.add
 			.text(
 				WIDTH / 2,
 				bodyY,
-				`You completed all ${this.totalLevels} levels!\n\nYou have proven yourself worthy of the skies. But did you truly? Because for you flew too close to the sun...`,
+				sanitizePixelFont(
+					`You lost ${this.giftsLost} gifts on the way up. The wax held long enough.`,
+				),
 				{
 					font: `${bodyFontSize}px Pixelify Sans`,
-					color: '#ffffff',
+					color: '#fdfdfe',
 					align: 'center',
 					lineSpacing: 8,
 					wordWrap: { useAdvancedWrap: true, width: WIDTH - 200 },
@@ -75,7 +68,7 @@ export class Win extends Scene {
 			.setDepth(4);
 
 		this.keyHints = this.add
-			.text(WIDTH / 2, hintsY, 'Press any key to reload', {
+			.text(WIDTH / 2, hintsY, 'Press any key to return', {
 				font: `${hintFontSize}px Pixelify Sans`,
 				color: '#cccccc',
 				align: 'center',
@@ -85,7 +78,6 @@ export class Win extends Scene {
 			.setAlpha(0.95)
 			.setDepth(4);
 
-		// Add blinking animation to hints
 		this.tweens.add({
 			targets: this.keyHints,
 			alpha: { from: 0.6, to: 1 },
@@ -95,13 +87,12 @@ export class Win extends Scene {
 			ease: 'Sine.easeInOut',
 		});
 
-		// Reload browser on any key press or click
 		this.input.keyboard?.once('keydown', () => {
-			window.location.reload();
+			this.scene.start('Menu');
 		});
 
 		this.input.once('pointerdown', () => {
-			window.location.reload();
+			this.scene.start('Menu');
 		});
 	}
 }

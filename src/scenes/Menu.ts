@@ -27,7 +27,7 @@ export class Menu extends Scene {
 		super('Menu');
 
 		this.navigation = [
-			{ key: 'START GAME', scene: 'Play' },
+			{ key: 'FLY', scene: 'Play' },
 			{ key: 'ABOUT', scene: 'About' },
 			{ key: 'CREDITS', scene: 'Credits' },
 		];
@@ -129,19 +129,16 @@ export class Menu extends Scene {
 	setSelected(index: number) {
 		this.selectedIndex = Phaser.Math.Clamp(index, 0, this.menu.length - 1);
 		this.menu.forEach((t, i) => {
-			t.setStyle({ color: '#ffffff' });
-
-			if (i === this.selectedIndex) {
-				t.setFontSize(this.selectedSize);
-			} else {
-				t.setFontSize(this.unselectedSize);
-			}
+			t.setFontSize(this.unselectedSize);
+			t.setStyle({
+				color: i === this.selectedIndex ? '#ffdd00' : '#ffffff',
+			});
 		});
 
 		const selected = this.menu[this.selectedIndex];
 		if (this.arrow && selected) {
 			this.arrow.setPosition(this.menuLeft, selected.y);
-			this.arrow.setScale(this.selectedSize / 224);
+			this.arrow.setScale(this.unselectedSize / 224);
 			this.arrow.setVisible(true);
 		}
 
@@ -166,8 +163,8 @@ export class Menu extends Scene {
 			maxY = Math.max(maxY, ab.bottom);
 		}
 
-		const paddingX = Math.max(24, Math.floor(this.selectedSize * 0.6));
-		const paddingY = Math.max(12, Math.floor(this.selectedSize * 0.35));
+		const paddingX = Math.max(24, Math.floor(this.unselectedSize * 0.6));
+		const paddingY = Math.max(12, Math.floor(this.unselectedSize * 0.35));
 
 		const arrowWidth = this.arrow?.displayWidth ?? 0;
 		const contentWidth =
