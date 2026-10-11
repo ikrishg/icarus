@@ -1,6 +1,7 @@
 import { type GameObjects, Scene } from 'phaser';
 import { BackgroundManager } from '../components/Background';
 import { HEIGHT, WIDTH } from '../util/constants';
+import { PALETTE, PALETTE_HEX } from '../util/palette';
 import { sanitizePixelFont } from '../util/text';
 
 export class Dead extends Scene {
@@ -15,15 +16,13 @@ export class Dead extends Scene {
 	}
 
 	create() {
-		// Stop all music
 		this.sound.stopAll();
 
 		this.backgroundManager = new BackgroundManager(this);
 
 		this.backdrop = this.add
-			.rectangle(0, 0, WIDTH, HEIGHT, 0x000000)
+			.rectangle(0, 0, WIDTH, HEIGHT, PALETTE.deep, 0.92)
 			.setOrigin(0, 0)
-			.setAlpha(0.9)
 			.setDepth(3);
 
 		const headlineFontSize = 112;
@@ -35,35 +34,24 @@ export class Dead extends Scene {
 		const hintsY = HEIGHT - 100;
 
 		this.deadHeadline = this.add
-			.text(WIDTH / 2, headlineY, '💀 ICARUS HAS FALLEN 💀', {
+			.text(WIDTH / 2, headlineY, 'THE WAX GAVE WAY', {
 				font: `${headlineFontSize}px Pixelify Sans`,
-				color: '#ff4444',
+				color: PALETTE_HEX.fire,
+				stroke: PALETTE_HEX.deep,
+				strokeThickness: 4,
 				align: 'center',
 			})
 			.setOrigin(0.5)
-			.setShadow(6, 6, '#000000', 8)
 			.setDepth(4);
-
-		// Add shake animation
-		this.tweens.add({
-			targets: this.deadHeadline,
-			x: { from: WIDTH / 2 - 5, to: WIDTH / 2 + 5 },
-			duration: 100,
-			yoyo: true,
-			repeat: 3,
-			ease: 'Linear',
-		});
 
 		this.deadBody = this.add
 			.text(
 				WIDTH / 2,
 				bodyY,
-				sanitizePixelFont(
-					`The sun has claimed another victim.\n\nYou flew too close, and the wax melted.\n\nBut legends are made through perseverance...`,
-				),
+				sanitizePixelFont('Icarus fell. Try again.'),
 				{
 					font: `${bodyFontSize}px Pixelify Sans`,
-					color: '#ffcccc',
+					color: '#fdfdfe',
 					align: 'center',
 					lineSpacing: 12,
 					wordWrap: { useAdvancedWrap: true, width: WIDTH - 200 },
@@ -73,7 +61,7 @@ export class Dead extends Scene {
 			.setDepth(4);
 
 		this.keyHints = this.add
-			.text(WIDTH / 2, hintsY, 'Press any key to reload', {
+			.text(WIDTH / 2, hintsY, 'Press any key to return', {
 				font: `${hintFontSize}px Pixelify Sans`,
 				color: '#cccccc',
 				align: 'center',
@@ -83,23 +71,12 @@ export class Dead extends Scene {
 			.setAlpha(0.95)
 			.setDepth(4);
 
-		// Add blinking animation to hints
-		this.tweens.add({
-			targets: this.keyHints,
-			alpha: { from: 0.6, to: 1 },
-			duration: 1000,
-			yoyo: true,
-			repeat: -1,
-			ease: 'Sine.easeInOut',
-		});
-
-		// Reload browser on any key press or click
 		this.input.keyboard?.once('keydown', () => {
-			window.location.reload();
+			this.scene.start('Menu');
 		});
 
 		this.input.once('pointerdown', () => {
-			window.location.reload();
+			this.scene.start('Menu');
 		});
 	}
 }
