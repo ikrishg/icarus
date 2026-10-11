@@ -5,6 +5,7 @@ declare global {
 	interface Window {
 		__icarusGame?: Game;
 		__icarusGetColliders?: () => number;
+		__icarusGetLives?: () => number;
 	}
 }
 
