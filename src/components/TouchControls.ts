@@ -24,17 +24,13 @@ export function isTouchDevice(scene?: Scene): boolean {
 	);
 }
 
-const BTN = {
-	size: 88,
-	margin: 24,
-	alpha: 0.45,
-	fill: 0xffffff,
-	stroke: 0x1b1b1c,
-};
+const MIN_TOUCH_CSS_PX = 44;
+const BASE_BTN_GAME_PX = 88;
+const BASE_MARGIN_GAME_PX = 24;
 
 export class TouchControls {
 	private scene: Scene;
-	private root: Phaser.GameObjects.Container;
+	private nodes: Phaser.GameObjects.GameObject[] = [];
 	private state: TouchInputState = {
 		left: false,
 		right: false,
@@ -49,38 +45,62 @@ export class TouchControls {
 	private prevShoot = false;
 	private prevDash = false;
 	visible = false;
+	readonly tapTargets: {
+		right?: { x: number; y: number };
+		jump?: { x: number; y: number };
+	} = {};
 
 	constructor(scene: Scene) {
 		this.scene = scene;
-		this.root = scene.add.container(0, 0).setDepth(200).setScrollFactor(0);
 		if (!isTouchDevice(scene)) {
-			this.root.setVisible(false);
 			return;
 		}
 		this.visible = true;
 		this.build();
 	}
 
+	private layoutMetrics() {
+		const displayScale = Math.max(
+			this.scene.scale.displaySize.width / WIDTH,
+			this.scene.scale.displaySize.height / HEIGHT,
+		);
+		const size = Math.max(
+			BASE_BTN_GAME_PX,
+			Math.ceil(MIN_TOUCH_CSS_PX / displayScale),
+		);
+		const margin = Math.max(
+			BASE_MARGIN_GAME_PX,
+			Math.ceil(16 / displayScale),
+		);
+		const gap = Math.max(16, Math.ceil(12 / displayScale));
+		return { size, margin, gap };
+	}
+
 	private makeButton(
 		x: number,
 		y: number,
+		size: number,
 		label: string,
 		onDown: () => void,
 		onUp: () => void,
-	): Phaser.GameObjects.Container {
-		const container = this.scene.add.container(x, y);
+	): void {
 		const bg = this.scene.add
-			.rectangle(0, 0, BTN.size, BTN.size, BTN.fill, BTN.alpha)
-			.setStrokeStyle(4, BTN.stroke, 0.9)
+			.rectangle(x, y, size, size, 0xffffff, 0.45)
+			.setStrokeStyle(4, 0x1b1b1c, 0.9)
+			.setScrollFactor(0)
+			.setDepth(201)
 			.setInteractive({ useHandCursor: false });
+		const fontSize = Math.max(24, Math.floor(size * 0.32));
 		const text = this.scene.add
-			.text(0, 0, label, {
+			.text(x, y, label, {
 				fontFamily: 'Pixelify Sans',
-				fontSize: '28px',
+				fontSize: `${fontSize}px`,
 				color: '#1b1b1c',
 				align: 'center',
 			})
-			.setOrigin(0.5);
+			.setOrigin(0.5)
+			.setScrollFactor(0)
+			.setDepth(200);
 
 		bg.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
 			pointer.event?.preventDefault();
@@ -89,19 +109,19 @@ export class TouchControls {
 		bg.on('pointerup', onUp);
 		bg.on('pointerout', onUp);
 
-		container.add([bg, text]);
-		return container;
+		this.nodes.push(bg, text);
 	}
 
 	private build() {
-		const baseY = HEIGHT - BTN.margin - BTN.size / 2;
-		const leftX = BTN.margin + BTN.size / 2;
-		const midX = leftX + BTN.size + 16;
-		const rightX = midX + BTN.size + 16;
+		const { size, margin, gap } = this.layoutMetrics();
+		const baseY = HEIGHT - margin - size / 2;
+		const leftX = margin + size / 2;
+		const rightX = leftX + size + gap;
 
-		const leftBtn = this.makeButton(
+		this.makeButton(
 			leftX,
 			baseY,
+			size,
 			'◀',
 			() => {
 				this.state.left = true;
@@ -111,9 +131,11 @@ export class TouchControls {
 			},
 		);
 
-		const rightBtn = this.makeButton(
+		this.tapTargets.right = { x: rightX, y: baseY };
+		this.makeButton(
 			rightX,
 			baseY,
+			size,
 			'▶',
 			() => {
 				this.state.right = true;
@@ -123,10 +145,13 @@ export class TouchControls {
 			},
 		);
 
-		const jumpY = baseY - BTN.size - 20;
-		const jumpBtn = this.makeButton(
-			rightX + BTN.size + 40,
+		const jumpY = baseY - size - gap;
+		const jumpX = rightX + size + gap * 2;
+		this.tapTargets.jump = { x: jumpX, y: jumpY };
+		this.makeButton(
+			jumpX,
 			jumpY,
+			size,
 			'↑',
 			() => {
 				this.state.jump = true;
@@ -136,9 +161,10 @@ export class TouchControls {
 			},
 		);
 
-		const shootBtn = this.makeButton(
-			WIDTH - BTN.margin - BTN.size / 2,
+		this.makeButton(
+			WIDTH - margin - size / 2,
 			baseY,
+			size,
 			'E',
 			() => {
 				this.state.shoot = true;
@@ -148,9 +174,10 @@ export class TouchControls {
 			},
 		);
 
-		const dashBtn = this.makeButton(
-			WIDTH - BTN.margin - BTN.size / 2,
+		this.makeButton(
+			WIDTH - margin - size / 2,
 			jumpY,
+			size,
 			'Q',
 			() => {
 				this.state.dash = true;
@@ -159,8 +186,6 @@ export class TouchControls {
 				this.state.dash = false;
 			},
 		);
-
-		this.root.add([leftBtn, rightBtn, jumpBtn, shootBtn, dashBtn]);
 	}
 
 	beginFrame() {
@@ -176,12 +201,25 @@ export class TouchControls {
 		return this.state;
 	}
 
+	setTouchState(
+		partial: Partial<
+			Pick<TouchInputState, 'left' | 'right' | 'jump' | 'shoot' | 'dash'>
+		>,
+	) {
+		Object.assign(this.state, partial);
+	}
+
 	setGameplayVisible(visible: boolean) {
 		if (!this.visible) return;
-		this.root.setVisible(visible);
+		for (const node of this.nodes) {
+			node.setVisible(visible);
+		}
 	}
 
 	destroy() {
-		this.root.destroy();
+		for (const node of this.nodes) {
+			node.destroy();
+		}
+		this.nodes = [];
 	}
 }

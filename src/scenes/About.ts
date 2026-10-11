@@ -53,7 +53,7 @@ export class About extends Scene {
 				leftPadding,
 				bodyY,
 				sanitizePixelFont(
-					`The fall of Icarus, the legendary Icarus who dared to fly too close to the sun with wings made of feathers and wax, is a timeless tale of ambition, hubris, and the consequences of overreaching one's limits. Crafted in the spirit of classic arcade games, this project is a tribute to the enduring allure of myth and the thrill of adventure. This game is one where you go through a platformer but have to lose one ability each level. Every 8 levels you gain 3 abilities back. Choose carefully, or you might have to restart from the beginning!`,
+					`The fall of Icarus, the legendary Icarus who dared to fly too close to the sun with wings made of feathers and wax, is a timeless tale of ambition, hubris, and the consequences of overreaching one's limits. Crafted in the spirit of classic arcade games, this project is a tribute to the enduring allure of myth and the thrill of adventure. This game is one where you go through a platformer but have to lose one ability each level. On blessing levels (5, 12, 16, 22, and 27) you can regain up to three abilities you lost. Choose carefully, or you might have to restart from the beginning!`,
 				),
 				{
 					font: `${bodyFontSize}px Pixelify Sans`,

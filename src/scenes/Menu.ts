@@ -21,6 +21,7 @@ export class Menu extends Scene {
 	arrowOffset = 0;
 	menuLeft = 0;
 	menuBoxWidth = 0;
+	private menuKeyHandler?: (event: KeyboardEvent) => void;
 
 	constructor() {
 		super('Menu');
@@ -33,6 +34,12 @@ export class Menu extends Scene {
 	}
 
 	create() {
+		this.menu = [];
+		this.selectedIndex = 0;
+		if (this.menuKeyHandler) {
+			this.input.keyboard?.off('keydown', this.menuKeyHandler);
+		}
+
 		// Stop all music and play menu music
 		this.sound.stopAll();
 		const music = this.sound.add('instruments', { loop: true, volume: 0.5 });
@@ -100,7 +107,7 @@ export class Menu extends Scene {
 
 		this.setSelected(0);
 
-		this.input.keyboard?.on('keydown', (event: KeyboardEvent) => {
+		this.menuKeyHandler = (event: KeyboardEvent) => {
 			switch (event.code) {
 				case 'ArrowUp':
 				case 'KeyW':
@@ -115,7 +122,8 @@ export class Menu extends Scene {
 					this.activateIndex(this.selectedIndex);
 					break;
 			}
-		});
+		};
+		this.input.keyboard?.on('keydown', this.menuKeyHandler);
 	}
 
 	setSelected(index: number) {
