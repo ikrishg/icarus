@@ -5,6 +5,11 @@ import { LevelManager } from '../components/LevelManager';
 import { Player } from '../components/Player';
 import { TouchControls } from '../components/TouchControls';
 import type { PlayerAbilities } from '../util/types';
+import {
+	DEPTH_PLAY_HUD_BAR,
+	DEPTH_PLAY_HUD_TEXT,
+	PLAY_HUD_CLEARANCE_Y,
+} from '../util/constants';
 import { sanitizePixelFont } from '../util/text';
 
 const ABILITY_CARD_FILL = 0xd6c9b6;
@@ -71,7 +76,10 @@ export class Play extends Scene {
 		// Stop all music and play battle music
 		this.sound.stopAll();
 
-		this.backgroundManager = new BackgroundManager(this, { icarus: false });
+		this.backgroundManager = new BackgroundManager(this, {
+			icarus: false,
+			hudClearance: PLAY_HUD_CLEARANCE_Y,
+		});
 
 		this.abilityManager = new AbilityManager();
 		this.levelManager = new LevelManager(this);

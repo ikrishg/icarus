@@ -1,8 +1,15 @@
 import type { GameObjects, Scene } from 'phaser';
-import { HEIGHT, WIDTH } from '../util/constants';
+import {
+	DEPTH_BACKGROUND,
+	DEPTH_CLOUDS,
+	HEIGHT,
+	WIDTH,
+} from '../util/constants';
 
 export interface BackgroundOptions {
 	icarus: boolean;
+	/** When set, clouds stay below the play HUD (title + restart hint). */
+	hudClearance?: number;
 }
 
 interface IcarusSprite extends GameObjects.Sprite {
@@ -41,15 +48,24 @@ export class BackgroundManager {
 		this.scene.add
 			.image(0, 0, 'background')
 			.setOrigin(0)
-			.setDisplaySize(WIDTH, HEIGHT);
+			.setDisplaySize(WIDTH, HEIGHT)
+			.setDepth(DEPTH_BACKGROUND);
+	}
+
+	private cloudYRange(): { minY: number; maxY: number } {
+		const edgeMargin = Math.max(16, Math.floor(Math.min(WIDTH, HEIGHT) * 0.02));
+		const minY = this.options.hudClearance ?? edgeMargin;
+		const maxY = Math.max(minY, Math.floor(HEIGHT - edgeMargin));
+		return { minY, maxY };
 	}
 
 	createClouds() {
 		const cloudCount = 6;
 		const edgeMargin = Math.max(16, Math.floor(Math.min(WIDTH, HEIGHT) * 0.02));
+		const { minY, maxY } = this.cloudYRange();
 
 		for (let i = 0; i < cloudCount; i++) {
-			const cy = Phaser.Math.Between(20, Math.max(20, Math.floor(HEIGHT - 20)));
+			const cy = Phaser.Math.Between(minY, maxY);
 			const startX = Phaser.Math.Between(
 				-Math.floor(WIDTH - edgeMargin),
 				Math.floor(WIDTH - edgeMargin),
@@ -58,7 +74,7 @@ export class BackgroundManager {
 				.sprite(startX, cy, 'cloud', Phaser.Math.Between(0, 2))
 				.setAlpha(0.9)
 				.setScale(6)
-				.setDepth(0.2);
+				.setDepth(DEPTH_CLOUDS);
 
 			const duration = Phaser.Math.Between(25000, 55000);
 
@@ -75,10 +91,8 @@ export class BackgroundManager {
 				repeat: -1,
 				onRepeat: () => {
 					cloud.x = WIDTH + cloud.displayWidth + edgeMargin;
-					cloud.y = Phaser.Math.Between(
-						edgeMargin,
-						Math.max(edgeMargin, Math.floor(HEIGHT - edgeMargin)),
-					);
+					const range = this.cloudYRange();
+					cloud.y = Phaser.Math.Between(range.minY, range.maxY);
 					cloud.setFrame(Phaser.Math.Between(0, 2));
 				},
 			});

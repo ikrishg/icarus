@@ -33,6 +33,7 @@ const config: Phaser.Types.Core.GameConfig = {
     parent: 'icarus-window',
     width: WIDTH,
     height: HEIGHT,
+    expandParent: true,
   },
   input: {
     touch: true,

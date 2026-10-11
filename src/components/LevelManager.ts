@@ -1,5 +1,6 @@
 import type { GameObjects, Scene } from 'phaser';
 import { LEVELS } from '../data/levels';
+import { DEPTH_PLAY_HUD_BAR, DEPTH_PLAY_HUD_TEXT } from '../util/constants';
 import type { LevelDefinition, ObstacleDef, Point } from '../util/types';
 import { Fireball } from './Fireball';
 
@@ -86,9 +87,23 @@ export class LevelManager {
 				},
 			)
 			.setOrigin(0.5, 0.5)
-			.setDepth(10);
+			.setDepth(DEPTH_PLAY_HUD_TEXT);
 
 		this.visuals.add(title);
+
+		const titleBg = this.scene.add
+			.rectangle(
+				0,
+				0,
+				this.scene.cameras.main.width,
+				title.getBounds().height + 20,
+				0x000000,
+				0.8,
+			)
+			.setOrigin(0, 0)
+			.setDepth(DEPTH_PLAY_HUD_BAR);
+
+		this.visuals.add(titleBg);
 
 		// Add restart shortcut indicator in top right
 		const restartHint = this.scene.add
@@ -104,23 +119,9 @@ export class LevelManager {
 				strokeThickness: 2,
 			})
 			.setOrigin(1, 0.5)
-			.setDepth(10);
+			.setDepth(DEPTH_PLAY_HUD_TEXT);
 
 		this.visuals.add(restartHint);
-
-		const titleBg = this.scene.add
-			.rectangle(
-				0,
-				0,
-				this.scene.cameras.main.width,
-				title.getBounds().height + 20,
-				0x000000,
-				0.8,
-			)
-			.setOrigin(0, 0)
-			.setDepth(9);
-
-		this.visuals.add(titleBg);
 
 		const groundY = this.scene.cameras.main.height - 40;
 		const groundWidth = this.scene.cameras.main.width;
