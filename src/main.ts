@@ -29,9 +29,14 @@ const config: Phaser.Types.Core.GameConfig = {
   },
   scale: {
     mode: Scale.ScaleModes.FIT,
-    autoCenter: Scale.Center.NO_CENTER,
-    fullscreenTarget: 'icarus-window',
-    max: { width: WIDTH, height: HEIGHT },
+    autoCenter: Scale.Center.CENTER_BOTH,
+    parent: 'icarus-window',
+    width: WIDTH,
+    height: HEIGHT,
+  },
+  input: {
+    touch: true,
+    activePointers: 2,
   },
 };
 

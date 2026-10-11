@@ -3,7 +3,9 @@ import { AbilityManager } from '../components/AbilityManager';
 import { BackgroundManager } from '../components/Background';
 import { LevelManager } from '../components/LevelManager';
 import { Player } from '../components/Player';
+import { TouchControls } from '../components/TouchControls';
 import type { PlayerAbilities } from '../util/types';
+import { sanitizePixelFont } from '../util/text';
 
 const ABILITY_CARD_FILL = 0xd6c9b6;
 const ABILITY_CARD_INK = 0x442d32;
@@ -17,8 +19,10 @@ function abilityGridStartX(
 	cols: number,
 	boxSize: number,
 	spacing: number,
+	itemCount?: number,
 ): number {
-	const gridWidth = cols * boxSize + (cols - 1) * spacing;
+	const count = itemCount ?? cols;
+	const gridWidth = count * boxSize + (count - 1) * spacing;
 	return (canvasWidth - gridWidth) / 2 + boxSize / 2;
 }
 
@@ -55,6 +59,9 @@ export class Play extends Scene {
 	abilityManager: AbilityManager;
 	isResetting = false;
 	visionOverlay: Phaser.GameObjects.Rectangle;
+	touchControls: TouchControls;
+	instructionText?: Phaser.GameObjects.Text;
+	private colliders: Phaser.Physics.Arcade.Collider[] = [];
 
 	constructor() {
 		super('Play');
@@ -77,6 +84,9 @@ export class Play extends Scene {
 			this.abilityManager,
 		);
 
+		this.touchControls = new TouchControls(this);
+		this.player.touchControls = this.touchControls;
+
 		// Create vision overlay
 		this.visionOverlay = this.add
 			.rectangle(
@@ -90,20 +100,29 @@ export class Play extends Scene {
 			.setDepth(100)
 			.setAlpha(this.abilityManager.getVisionAlpha());
 
-		this.setupCollisions();
+		this.setupLevelColliders();
+		window.__icarusGetColliders = () => this.colliders.length;
 		this.playBattleMusic();
 		this.showLevelInstruction();
 
-		this.input.keyboard?.on('keydown-ESC', () => {
-			this.scene.switch('Menu');
+		this.time.addEvent({
+			delay: 100,
+			callback: () => this.checkArrowEnemyHits(),
+			loop: true,
 		});
 
-		// Add skip level key (semicolon)
-		this.input.keyboard?.on('keydown-SEMICOLON', () => {
-			if (!this.isResetting) {
-				this.completeLevel();
-			}
+		this.input.keyboard?.on('keydown-ESC', () => {
+			this.sound.stopAll();
+			this.scene.start('Menu');
 		});
+
+		if (import.meta.env.DEV) {
+			this.input.keyboard?.on('keydown-SEMICOLON', () => {
+				if (!this.isResetting) {
+					this.completeLevel();
+				}
+			});
+		}
 
 		// Add restart key (SHIFT+R)
 		this.input.keyboard?.on('keydown-R', (event: KeyboardEvent) => {
@@ -121,22 +140,17 @@ export class Play extends Scene {
 			this.visionOverlay.setAlpha(this.abilityManager.getVisionAlpha());
 		}
 
-		// Check collision with dynamically spawned fireballs
-		this.levelManager.fireballs.forEach((fireball) => {
-			if (fireball.sprite?.active) {
-				this.physics.overlap(
-					this.player.sprite,
-					fireball.sprite,
-					() => {
-						if (!this.player.isDead && !this.isResetting) {
-							this.killPlayer();
-						}
-					},
-					undefined,
-					this,
-				);
+		for (const fireball of this.levelManager.fireballs) {
+			if (
+				fireball.sprite?.active &&
+				this.physics.overlap(this.player.sprite, fireball.sprite)
+			) {
+				if (!this.player.isDead && !this.isResetting) {
+					this.killPlayer();
+				}
+				break;
 			}
-		});
+		}
 
 		if (this.player?.sprite.y > this.cameras.main.height + 100) {
 			this.killPlayer();
@@ -181,8 +195,40 @@ export class Play extends Scene {
 		this.cameras.main.flash(300, 255, 0, 0);
 
 		this.time.delayedCall(1500, () => {
-			this.scene.start('Dead');
+			this.restartCurrentLevel();
 		});
+	}
+
+	restartCurrentLevel() {
+		if (!this.player) return;
+
+		const levelIndex = this.levelManager.currentIndex;
+		this.clearLevelInstruction();
+		this.clearColliders();
+		this.levelManager.goto(levelIndex);
+		this.player.revive(
+			this.levelManager.current.start.x,
+			this.levelManager.current.start.y,
+		);
+		this.setupLevelColliders();
+		this.showLevelInstruction();
+		this.isResetting = false;
+		this.playBattleMusic();
+	}
+
+	clearLevelInstruction() {
+		if (this.instructionText?.active) {
+			this.tweens.killTweensOf(this.instructionText);
+			this.instructionText.destroy();
+			this.instructionText = undefined;
+		}
+	}
+
+	clearColliders() {
+		for (const collider of this.colliders) {
+			collider.destroy();
+		}
+		this.colliders = [];
 	}
 
 	completeLevel() {
@@ -240,38 +286,37 @@ export class Play extends Scene {
 		this.scene.switch('Win', { totalLevels: this.levelManager.levels.length });
 	}
 
-	setupCollisions() {
+	setupLevelColliders() {
 		if (!this.player) return;
 
-		// Enable collision with platforms
-		this.physics.add.collider(this.player.sprite, this.levelManager.platforms);
+		this.colliders.push(
+			this.physics.add.collider(this.player.sprite, this.levelManager.platforms),
+		);
 
-		// Set up overlap detection for hazards (spikes, lava, lasers, enemies, fireballs)
 		const hazards =
 			this.levelManager.hazards.getChildren() as Phaser.GameObjects.GameObject[];
-		hazards.forEach((hazard) => {
-			// Check if hazard has a physics body
+		for (const hazard of hazards) {
 			const physicsObj = hazard as
 				| Phaser.Physics.Arcade.Sprite
 				| Phaser.GameObjects.Rectangle;
 			if (physicsObj) {
-				this.physics.add.overlap(
-					this.player.sprite,
-					physicsObj,
-					() => {
-						if (!this.player.isDead && !this.isResetting) {
-							this.killPlayer();
-						}
-					},
-					undefined,
-					this,
+				this.colliders.push(
+					this.physics.add.overlap(
+						this.player.sprite,
+						physicsObj,
+						() => {
+							if (!this.player.isDead && !this.isResetting) {
+								this.killPlayer();
+							}
+						},
+						undefined,
+						this,
+					),
 				);
 			}
-		});
+		}
 
-		// Set up overlap detection for portal
 		if (this.levelManager.portal) {
-			// Get the portal sprite from the container
 			const portalChildren =
 				this.levelManager.portal.getAll() as Phaser.Physics.Arcade.Sprite[];
 			const portalSprite = portalChildren.find(
@@ -279,70 +324,71 @@ export class Play extends Scene {
 			);
 
 			if (portalSprite) {
-				this.physics.add.overlap(
-					this.player.sprite,
-					portalSprite,
-					() => {
-						if (!this.player.isDead && !this.isResetting) {
-							this.completeLevel();
-						}
-					},
-					undefined,
-					this,
+				this.colliders.push(
+					this.physics.add.overlap(
+						this.player.sprite,
+						portalSprite,
+						() => {
+							if (!this.player.isDead && !this.isResetting) {
+								this.completeLevel();
+							}
+						},
+						undefined,
+						this,
+					),
 				);
 			}
 		}
+	}
 
-		// Set up collision for arrows with enemies
-		this.time.addEvent({
-			delay: 100,
-			callback: () => {
-				this.player.arrows.forEach((arrow) => {
-					if (!arrow.sprite?.active) return;
+	checkArrowEnemyHits() {
+		if (!this.player) return;
 
-					hazards.forEach((hazard) => {
-						const sprite = hazard as Phaser.Physics.Arcade.Sprite;
-						if (
-							sprite?.body &&
-							sprite.getData('hazard') &&
-							sprite.texture?.key === 'enemy'
-						) {
-							this.physics.add.overlap(
-								arrow.sprite,
-								sprite,
-								() => {
-									// Play shot sound
-									this.sound.play('shot', { volume: 0.5 });
+		const hazards =
+			this.levelManager.hazards.getChildren() as Phaser.Physics.Arcade.Sprite[];
 
-									// Destroy enemy and arrow
-									arrow.destroy();
-									sprite.destroy();
-									// Remove from hazards group
-									this.levelManager.hazards.remove(sprite, true, true);
-								},
-								undefined,
-								this,
-							);
-						}
-					});
-				});
-			},
-			loop: true,
-		});
+		for (const arrow of this.player.arrows) {
+			if (!arrow.sprite?.active) continue;
+
+			for (const hazard of hazards) {
+				const sprite = hazard;
+				if (
+					!sprite?.body ||
+					!sprite.getData('hazard') ||
+					sprite.texture?.key !== 'enemy' ||
+					!sprite.active
+				) {
+					continue;
+				}
+
+				if (this.physics.overlap(arrow.sprite, sprite)) {
+					this.sound.play('shot', { volume: 0.5 });
+					arrow.destroy();
+					sprite.destroy();
+					this.levelManager.hazards.remove(sprite, true, true);
+					break;
+				}
+			}
+		}
 	}
 
 	resetPlayer() {
 		if (!this.player) return;
+		this.clearLevelInstruction();
+		this.clearColliders();
 		const startPos = this.levelManager.current.start;
 		this.player.revive(startPos.x, startPos.y);
-		this.setupCollisions();
+		this.setupLevelColliders();
 	}
 
 	showLevelInstruction() {
+		this.clearLevelInstruction();
 		const lvl = this.levelManager.current;
-		const instruction = lvl.instruction ?? 'Reach the portal to complete!';
+		const instruction = sanitizePixelFont(
+			lvl.instruction ?? 'Reach the portal to complete!',
+		);
 
-		const instructionMsg = this.add
+		this.instructionText = this.add
 			.text(
 				this.cameras.main.width / 2,
 				this.cameras.main.height / 2 - 50,
@@ -366,15 +412,19 @@ export class Play extends Scene {
 
 		// Fade out instruction message
 		this.tweens.add({
-			targets: instructionMsg,
+			targets: this.instructionText,
 			alpha: 0,
 			duration: 1500,
 			delay: 2000,
-			onComplete: () => instructionMsg.destroy(),
+			onComplete: () => {
+				this.instructionText?.destroy();
+				this.instructionText = undefined;
+			},
 		});
 	}
 
 	showAbilityChoiceScreen() {
+		this.touchControls?.setGameplayVisible(false);
 		// Disable player controls during choice
 		this.player.controlsEnabled = false;
 
@@ -400,6 +450,21 @@ export class Play extends Scene {
 				strokeThickness: 8,
 				align: 'center',
 			})
+			.setOrigin(0.5)
+			.setDepth(21);
+
+		this.add
+			.text(
+				this.cameras.main.width / 2,
+				160,
+				'Tap a card or use arrow keys + Enter to choose',
+				{
+					fontFamily: 'Pixelify Sans',
+					fontSize: '32px',
+					color: '#ffffff',
+					align: 'center',
+				},
+			)
 			.setOrigin(0.5)
 			.setDepth(21);
 
@@ -517,6 +582,7 @@ export class Play extends Scene {
 
 			// Re-enable player controls
 			this.player.controlsEnabled = true;
+			this.touchControls?.setGameplayVisible(true);
 
 			// Clean up keyboard listener
 			this.input.keyboard?.off('keydown', keyHandler);
@@ -570,6 +636,7 @@ export class Play extends Scene {
 		updateSelection();
 	}
 	showAbilityGainScreen() {
+		this.touchControls?.setGameplayVisible(false);
 		// Disable player controls during choice
 		this.player.controlsEnabled = false;
 
@@ -620,6 +687,7 @@ export class Play extends Scene {
 		if (maxSelections === 0) {
 			bg.destroy();
 			this.player.controlsEnabled = true;
+			this.touchControls?.setGameplayVisible(true);
 			const hasNext = this.levelManager.next();
 			if (!hasNext) {
 				this.showWinScreen();
@@ -649,15 +717,32 @@ export class Play extends Scene {
 			.setOrigin(0.5)
 			.setDepth(21);
 
+		this.add
+			.text(
+				this.cameras.main.width / 2,
+				160,
+				'Tap cards or use arrow keys + Enter — pick each regain in turn',
+				{
+					fontFamily: 'Pixelify Sans',
+					fontSize: '32px',
+					color: '#ffffff',
+					align: 'center',
+					wordWrap: { width: this.cameras.main.width - 120 },
+				},
+			)
+			.setOrigin(0.5)
+			.setDepth(21);
+
 		const startY = 320;
 		const boxSize = 280;
 		const spacing = 40;
-		const cols = 3;
+		const cols = Math.min(3, upgradeableAbilities.length);
 		const startX = abilityGridStartX(
 			this.cameras.main.width,
 			cols,
 			boxSize,
 			spacing,
+			upgradeableAbilities.length,
 		);
 
 		let selectedAbilities = 0;
@@ -695,15 +780,22 @@ export class Play extends Scene {
 
 			addAbilityIcon(this, x, y, data.icon);
 
-			// Add ability name
+			// Add regain label (what you get back)
 			this.add
-				.text(x, y + 80, this.abilityManager.getAbilityDescription(data.key), {
-					fontFamily: 'Pixelify Sans',
-					fontSize: '28px',
-					color: ABILITY_CARD_INK_HEX,
-					align: 'center',
-					wordWrap: { width: boxSize - 20 },
-				})
+				.text(
+					x,
+					y + 80,
+					sanitizePixelFont(
+						this.abilityManager.getAbilityRegainLabel(data.key),
+					),
+					{
+						fontFamily: 'Pixelify Sans',
+						fontSize: '28px',
+						color: ABILITY_CARD_INK_HEX,
+						align: 'center',
+						wordWrap: { width: boxSize - 20 },
+					},
+				)
 				.setOrigin(0.5)
 				.setDepth(22);
 
@@ -744,6 +836,7 @@ export class Play extends Scene {
 				this.time.delayedCall(1000, () => {
 					// Re-enable player controls
 					this.player.controlsEnabled = true;
+					this.touchControls?.setGameplayVisible(true);
 
 					// Clean up keyboard listener
 					this.input.keyboard?.off('keydown', keyHandler);

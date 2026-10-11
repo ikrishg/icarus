@@ -73,6 +73,37 @@ export class AbilityManager {
 		};
 	}
 
+	/** Label for ability regain UI (next tier after upgrade). */
+	getAbilityRegainLabel(abilityKey: keyof PlayerAbilities): string {
+		const current = this.abilities[abilityKey];
+		if (typeof current === 'number') {
+			switch (abilityKey) {
+				case 'jumpLevel':
+					if (current === 0) return 'Regain: Single Jump';
+					if (current === 1) return 'Regain: Double Jump';
+					if (current === 2) return 'Regain: Flight (4 jumps)';
+					return 'Jump (maxed)';
+				case 'visionLevel':
+					if (current === 0) return 'Regain: Dim Vision';
+					if (current === 1) return 'Regain: Perfect Vision';
+					return 'Vision (maxed)';
+				case 'dashLevel':
+					if (current === 0) return 'Regain: Normal Speed';
+					if (current === 1) return 'Regain: Dash';
+					return 'Dash (maxed)';
+				default:
+					return this.getAbilityDescription(abilityKey);
+			}
+		}
+		if (abilityKey === 'canMoveLeft' && !current) {
+			return 'Regain: Move Left';
+		}
+		if (abilityKey === 'canShootArrows' && !current) {
+			return 'Regain: Shoot Arrows';
+		}
+		return this.getAbilityDescription(abilityKey);
+	}
+
 	// Get ability description
 	getAbilityDescription(abilityKey: keyof PlayerAbilities): string {
 		switch (abilityKey) {

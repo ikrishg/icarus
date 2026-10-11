@@ -1,6 +1,7 @@
 import { type GameObjects, Scene } from 'phaser';
 import { BackgroundManager } from '../components/Background';
 import { HEIGHT, WIDTH } from '../util/constants';
+import { sanitizePixelFont } from '../util/text';
 
 export class About extends Scene {
 	backgroundManager: BackgroundManager;
@@ -51,7 +52,9 @@ export class About extends Scene {
 			.text(
 				leftPadding,
 				bodyY,
-				`The fall of Icarus, the legendary Icarus who dared to fly too close to the sun with wings made of feathers and wax, is a timeless tale of ambition, hubris, and the consequences of overreaching one's limits. Crafted in the spirit of classic arcade games, this project is a tribute to the enduring allure of myth and the thrill of adventure. This game is one where you go through a platformer but have to lose one ability each level. Every 5 levels you gain 3 abilities back. Choose carefully, or you might have to restart from the beginning!`,
+				sanitizePixelFont(
+					`The fall of Icarus, the legendary Icarus who dared to fly too close to the sun with wings made of feathers and wax, is a timeless tale of ambition, hubris, and the consequences of overreaching one's limits. Crafted in the spirit of classic arcade games, this project is a tribute to the enduring allure of myth and the thrill of adventure. This game is one where you go through a platformer but have to lose one ability each level. Every 8 levels you gain 3 abilities back. Choose carefully, or you might have to restart from the beginning!`,
+				),
 				{
 					font: `${bodyFontSize}px Pixelify Sans`,
 					color: '#ffffff',

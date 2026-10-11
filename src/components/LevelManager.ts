@@ -92,7 +92,11 @@ export class LevelManager {
 
 		// Add restart shortcut indicator in top right
 		const restartHint = this.scene.add
-			.text(this.scene.cameras.main.width - 20, 50, 'SHIFT + R to restart', {
+			.text(
+				this.scene.cameras.main.width - 20,
+				50,
+				'SHIFT + R to restart level',
+				{
 				fontFamily: 'Pixelify Sans',
 				fontSize: '40px',
 				color: '#ffffff',
@@ -122,27 +126,8 @@ export class LevelManager {
 		const groundWidth = this.scene.cameras.main.width;
 		const groundHeight = 80;
 
-		// Tile ground sprites across the bottom
-		const groundFrameWidth = 448;
-		const numGroundTiles = Math.ceil(groundWidth / groundFrameWidth) + 1;
-
-		for (let i = 0; i < numGroundTiles; i++) {
-			const groundSprite = this.scene.add.sprite(
-				i * groundFrameWidth,
-				groundY,
-				'ground',
-				0,
-			);
-			groundSprite.setOrigin(0, 0);
-			groundSprite.setDepth(5);
-			this.visuals.add(groundSprite);
-			this.platforms.add(groundSprite);
-
-			const body = groundSprite.body as Phaser.Physics.Arcade.StaticBody;
-			body.setSize(groundFrameWidth, groundHeight);
-			body.setOffset(0, 0);
-			body.updateFromGameObject();
-		}
+		this.addTiledGroundVisual(0, groundY, groundWidth, groundHeight);
+		this.addStaticPlatformCollider(0, groundY, groundWidth, groundHeight);
 
 		// Create portal at goal position
 		this.createPortal(level.goal.x, level.goal.y);
@@ -150,31 +135,8 @@ export class LevelManager {
 		// draw obstacles with improved styling
 		level.obstacles.forEach((o) => {
 			if (o.type === 'platform') {
-				// Create physics-enabled platform using ground sprites (tiled)
-				const platformFrameWidth = 448;
-				const numPlatformTiles = Math.ceil(o.w / platformFrameWidth);
-
-				// Create individual sprites for the platform
-				for (let i = 0; i < numPlatformTiles; i++) {
-					const tileX = o.x + i * platformFrameWidth;
-					const platformSprite = this.scene.add.sprite(tileX, o.y, 'ground', 0);
-					platformSprite.setOrigin(0, 0);
-					platformSprite.setDisplaySize(
-						Math.min(platformFrameWidth, o.w - i * platformFrameWidth),
-						o.h,
-					);
-					platformSprite.setDepth(5);
-					this.visuals.add(platformSprite);
-					this.platforms.add(platformSprite);
-
-					const body = platformSprite.body as Phaser.Physics.Arcade.StaticBody;
-					body.setSize(
-						Math.min(platformFrameWidth, o.w - i * platformFrameWidth),
-						o.h,
-					);
-					body.setOffset(0, 0);
-					body.updateFromGameObject();
-				}
+				this.addTiledGroundVisual(o.x, o.y, o.w, o.h);
+				this.addStaticPlatformCollider(o.x, o.y, o.w, o.h);
 			} else if (o.type === 'spikes') {
 				// Use spike sprites with proper sizing and spacing
 				const spikeOriginalWidth = 402; // from Boot.ts frameWidth
@@ -309,6 +271,48 @@ export class LevelManager {
 				this.fireballTimers.push(timer);
 			}
 		});
+	}
+
+	private addTiledGroundVisual(
+		x: number,
+		y: number,
+		width: number,
+		height: number,
+	) {
+		const platformFrameWidth = 448;
+		const numPlatformTiles = Math.ceil(width / platformFrameWidth);
+
+		for (let i = 0; i < numPlatformTiles; i++) {
+			const tileX = x + i * platformFrameWidth;
+			const tileW = Math.min(platformFrameWidth, width - i * platformFrameWidth);
+			const platformSprite = this.scene.add.sprite(tileX, y, 'ground', 0);
+			platformSprite.setOrigin(0, 0);
+			platformSprite.setDisplaySize(tileW, height);
+			platformSprite.setDepth(5);
+			this.visuals.add(platformSprite);
+		}
+	}
+
+	private addStaticPlatformCollider(
+		x: number,
+		y: number,
+		width: number,
+		height: number,
+	) {
+		const collider = this.scene.add.rectangle(
+			x + width / 2,
+			y + height / 2,
+			width,
+			height,
+			0x000000,
+			0,
+		);
+		this.scene.physics.add.existing(collider, true);
+		const body = collider.body as Phaser.Physics.Arcade.StaticBody;
+		body.setSize(width, height);
+		body.updateFromGameObject();
+		this.platforms.add(collider);
+		this.visuals.add(collider);
 	}
 
 	createPortal(x: number, y: number) {
