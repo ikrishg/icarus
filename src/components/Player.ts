@@ -55,7 +55,7 @@ export class Player {
 
 		// Set collision properties
 		this.sprite.setBounce(0.1);
-		this.sprite.setCollideWorldBounds(true);
+		this.sprite.setCollideWorldBounds(false);
 
 		const body = this.sprite.body as Phaser.Physics.Arcade.Body;
 		body.setSize(24, 44);
@@ -231,18 +231,6 @@ export class Player {
 
 		// Clean up destroyed arrows
 		this.arrows = this.arrows.filter((a) => a.sprite?.active);
-	}
-
-	die() {
-		if (this.isDead) return;
-
-		this.isDead = true;
-		this.sprite.setTint(0xff0000); // Red tint on death
-		this.sprite.setVelocity(0, -300); // Pop up slightly
-		this.sprite.setAngularVelocity(500); // Spin
-
-		// Stop animation
-		this.sprite.stop();
 	}
 
 	revive(x: number, y: number) {
