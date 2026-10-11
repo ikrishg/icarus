@@ -1,6 +1,8 @@
 import { type GameObjects, Scene } from 'phaser';
 import { BackgroundManager } from '../components/Background';
 import { HEIGHT, WIDTH } from '../util/constants';
+import { PALETTE_HEX } from '../util/palette';
+import { sanitizePixelFont } from '../util/text';
 
 export class Home extends Scene {
 	backgroundManager: BackgroundManager;
@@ -12,7 +14,6 @@ export class Home extends Scene {
 	}
 
 	create() {
-		// Stop all music
 		this.sound.stopAll();
 
 		this.backgroundManager = new BackgroundManager(this);
@@ -22,14 +23,27 @@ export class Home extends Scene {
 			.setDepth(5);
 
 		this.instruction = this.add
-			.text(WIDTH / 2, HEIGHT - 150, 'CLICK OR PRESS ANY KEY TO START', {
-				font: '48px Pixelify Sans',
-				fontStyle: '700',
-				color: '#1b1b1c',
-			})
+			.text(
+				WIDTH / 2,
+				HEIGHT * 0.7,
+				sanitizePixelFont('Press any key or tap'),
+				{
+					font: '48px Pixelify Sans',
+					fontStyle: '700',
+					color: PALETTE_HEX.deep,
+				},
+			)
 			.setOrigin(0.5)
-			.setShadow(2, 2, '#ffffff', 0.5, false, true)
 			.setDepth(5);
+
+		this.tweens.add({
+			targets: this.instruction,
+			alpha: { from: 0.55, to: 1 },
+			duration: 1000,
+			yoyo: true,
+			repeat: -1,
+			ease: 'Sine.easeInOut',
+		});
 
 		this.input.once('pointerdown', () => {
 			this.startGame();

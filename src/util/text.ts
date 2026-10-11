@@ -13,6 +13,7 @@ export function sanitizePixelFont(text: string): string {
 	let out = text;
 	out = breakLigature('fl', out);
 	out = breakLigature('fi', out);
+	out = breakLigature('ff', out);
 	return out;
 }
 
