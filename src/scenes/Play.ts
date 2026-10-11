@@ -21,14 +21,37 @@ const ABILITY_ICON_MAX = 120;
 
 function abilityGridStartX(
 	canvasWidth: number,
-	cols: number,
 	boxSize: number,
 	spacing: number,
-	itemCount?: number,
+	itemsInRow: number,
 ): number {
-	const count = itemCount ?? cols;
-	const gridWidth = count * boxSize + (count - 1) * spacing;
+	const gridWidth = itemsInRow * boxSize + (itemsInRow - 1) * spacing;
 	return (canvasWidth - gridWidth) / 2 + boxSize / 2;
+}
+
+function abilityCardPosition(
+	canvasWidth: number,
+	index: number,
+	totalItems: number,
+	cols: number,
+	startY: number,
+	boxSize: number,
+	spacing: number,
+): { x: number; y: number } {
+	const col = index % cols;
+	const row = Math.floor(index / cols);
+	const rowStart = row * cols;
+	const itemsInRow = Math.min(cols, totalItems - rowStart);
+	const startX = abilityGridStartX(
+		canvasWidth,
+		boxSize,
+		spacing,
+		itemsInRow,
+	);
+	return {
+		x: startX + col * (boxSize + spacing),
+		y: startY + row * (boxSize + spacing),
+	};
 }
 
 function addAbilityIcon(
@@ -67,12 +90,21 @@ export class Play extends Scene {
 	touchControls: TouchControls;
 	instructionText?: Phaser.GameObjects.Text;
 	private colliders: Phaser.Physics.Arcade.Collider[] = [];
+	private escKeyHandler?: () => void;
+	private restartKeyHandler?: (event: KeyboardEvent) => void;
+	private skipKeyHandler?: () => void;
 
 	constructor() {
 		super('Play');
 	}
 
+	init() {
+		this.resetRunState();
+	}
+
 	create() {
+		this.resetRunState();
+
 		// Stop all music and play battle music
 		this.sound.stopAll();
 
@@ -119,25 +151,48 @@ export class Play extends Scene {
 			loop: true,
 		});
 
-		this.input.keyboard?.on('keydown-ESC', () => {
+		this.escKeyHandler = () => {
 			this.sound.stopAll();
 			this.scene.start('Menu');
-		});
+		};
+		this.input.keyboard?.on('keydown-ESC', this.escKeyHandler);
 
 		if (import.meta.env.DEV) {
-			this.input.keyboard?.on('keydown-SEMICOLON', () => {
+			this.skipKeyHandler = () => {
 				if (!this.isResetting) {
 					this.completeLevel();
 				}
-			});
+			};
+			this.input.keyboard?.on('keydown-SEMICOLON', this.skipKeyHandler);
 		}
 
-		// Add restart key (SHIFT+R)
-		this.input.keyboard?.on('keydown-R', (event: KeyboardEvent) => {
+		this.restartKeyHandler = (event: KeyboardEvent) => {
 			if (event.shiftKey && !this.isResetting) {
 				this.killPlayer();
 			}
-		});
+		};
+		this.input.keyboard?.on('keydown-R', this.restartKeyHandler);
+	}
+
+	resetRunState() {
+		this.isResetting = false;
+	}
+
+	shutdown() {
+		this.resetRunState();
+		this.clearLevelInstruction();
+		this.clearColliders();
+		this.touchControls?.destroy();
+		if (this.escKeyHandler) {
+			this.input.keyboard?.off('keydown-ESC', this.escKeyHandler);
+		}
+		if (this.restartKeyHandler) {
+			this.input.keyboard?.off('keydown-R', this.restartKeyHandler);
+		}
+		if (this.skipKeyHandler) {
+			this.input.keyboard?.off('keydown-SEMICOLON', this.skipKeyHandler);
+		}
+		delete window.__icarusGetColliders;
 	}
 
 	update() {
@@ -493,34 +548,26 @@ export class Play extends Scene {
 		const boxSize = 280;
 		const spacing = 40;
 		const cols = 3;
-		const startX = abilityGridStartX(
-			this.cameras.main.width,
-			cols,
-			boxSize,
-			spacing,
-		);
+		const downgradeable = abilityData.filter((data) => {
+			const currentValue = this.abilityManager.abilities[data.key];
+			if (typeof currentValue === 'number' && currentValue > 0) return true;
+			if (typeof currentValue === 'boolean' && currentValue) return true;
+			return false;
+		});
 
-		let buttonIndex = 0;
 		const buttons: Phaser.GameObjects.Rectangle[] = [];
 		let selectedIndex = 0;
 
-		abilityData.forEach((data) => {
-			const currentValue = this.abilityManager.abilities[data.key];
-
-			// Only show abilities that can be downgraded
-			let canDowngrade = false;
-			if (typeof currentValue === 'number' && currentValue > 0) {
-				canDowngrade = true;
-			} else if (typeof currentValue === 'boolean' && currentValue) {
-				canDowngrade = true;
-			}
-
-			if (!canDowngrade) return;
-
-			const col = buttonIndex % cols;
-			const row = Math.floor(buttonIndex / cols);
-			const x = startX + col * (boxSize + spacing);
-			const y = startY + row * (boxSize + spacing);
+		downgradeable.forEach((data, buttonIndex) => {
+			const { x, y } = abilityCardPosition(
+				this.cameras.main.width,
+				buttonIndex,
+				downgradeable.length,
+				cols,
+				startY,
+				boxSize,
+				spacing,
+			);
 
 			const button = this.add
 				.rectangle(x, y, boxSize, boxSize, ABILITY_CARD_FILL)
@@ -564,7 +611,6 @@ export class Play extends Scene {
 				.setOrigin(0.5)
 				.setDepth(22);
 
-			buttonIndex++;
 		});
 
 		// Function to update visual selection
@@ -745,26 +791,23 @@ export class Play extends Scene {
 		const boxSize = 280;
 		const spacing = 40;
 		const cols = Math.min(3, upgradeableAbilities.length);
-		const startX = abilityGridStartX(
-			this.cameras.main.width,
-			cols,
-			boxSize,
-			spacing,
-			upgradeableAbilities.length,
-		);
 
 		let selectedAbilities = 0;
-		let buttonIndex = 0;
 		const buttons: Phaser.GameObjects.Rectangle[] = [];
 		let selectedIndex = 0;
 
-		upgradeableAbilities.forEach((data) => {
+		upgradeableAbilities.forEach((data, buttonIndex) => {
 			const currentValue = this.abilityManager.abilities[data.key];
 
-			const col = buttonIndex % cols;
-			const row = Math.floor(buttonIndex / cols);
-			const x = startX + col * (boxSize + spacing);
-			const y = startY + row * (boxSize + spacing);
+			const { x, y } = abilityCardPosition(
+				this.cameras.main.width,
+				buttonIndex,
+				upgradeableAbilities.length,
+				cols,
+				startY,
+				boxSize,
+				spacing,
+			);
 
 			const button = this.add
 				.rectangle(x, y, boxSize, boxSize, ABILITY_CARD_FILL)
@@ -806,8 +849,6 @@ export class Play extends Scene {
 				)
 				.setOrigin(0.5)
 				.setDepth(22);
-
-			buttonIndex++;
 		});
 
 		// Function to update visual selection

@@ -1,49 +1,5 @@
 import { chromium, devices } from 'playwright';
-import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const distDir = path.join(__dirname, '..', 'dist');
-
-const mime = {
-	'.html': 'text/html',
-	'.js': 'application/javascript',
-	'.css': 'text/css',
-	'.webp': 'image/webp',
-	'.png': 'image/png',
-	'.ogg': 'audio/ogg',
-	'.mp3': 'audio/mpeg',
-	'.wav': 'audio/wav',
-};
-
-function startStaticServer() {
-	return new Promise((resolve) => {
-		const server = createServer(async (req, res) => {
-			const urlPath = decodeURIComponent(req.url?.split('?')[0] ?? '/');
-			const filePath = path.join(
-				distDir,
-				urlPath === '/' ? 'index.html' : urlPath,
-			);
-			try {
-				const data = await readFile(filePath);
-				const ext = path.extname(filePath);
-				res.writeHead(200, {
-					'Content-Type': mime[ext] ?? 'application/octet-stream',
-				});
-				res.end(data);
-			} catch {
-				res.writeHead(404);
-				res.end('Not found');
-			}
-		});
-		server.listen(0, '127.0.0.1', () => {
-			const { port } = server.address();
-			resolve({ server, baseUrl: `http://127.0.0.1:${port}` });
-		});
-	});
-}
+import { startStaticServer } from './static-server.mjs';
 
 async function bootToPlay(page, baseUrl) {
 	await page.goto(baseUrl);
@@ -69,6 +25,37 @@ async function getColliderCount(page) {
 	return page.evaluate(() => window.__icarusGetColliders?.() ?? -1);
 }
 
+async function getPlayerPos(page) {
+	return page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		return {
+			x: play?.player?.sprite?.x ?? 0,
+			y: play?.player?.sprite?.y ?? 0,
+		};
+	});
+}
+
+async function tapTouchTarget(page, target) {
+	const point = await page.evaluate((t) => {
+		const game = window.__icarusGame;
+		const play = game?.scene.getScene('Play');
+		const coords = play?.touchControls?.tapTargets?.[t];
+		if (!coords || !game?.canvas) return null;
+		const sm = game.scale;
+		const rect = game.canvas.getBoundingClientRect();
+		const scale = sm.displaySize.width / sm.width;
+		const offsetX = rect.left + (rect.width - sm.displaySize.width) / 2;
+		const offsetY = rect.top + (rect.height - sm.displaySize.height) / 2;
+		return {
+			x: offsetX + coords.x * scale,
+			y: offsetY + coords.y * scale,
+		};
+	}, target);
+	if (!point) return false;
+	await page.touchscreen.tap(point.x, point.y);
+	return true;
+}
+
 async function runDesktop(baseUrl) {
 	const browser = await chromium.launch();
 	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
@@ -81,10 +68,7 @@ async function runDesktop(baseUrl) {
 	await page.keyboard.down('ArrowRight');
 	await page.waitForTimeout(4500);
 	await page.keyboard.up('ArrowRight');
-	const playerXAfterWalk = await page.evaluate(() => {
-		const play = window.__icarusGame?.scene.getScene('Play');
-		return play?.player?.sprite?.x ?? 0;
-	});
+	const playerXAfterWalk = (await getPlayerPos(page)).x;
 
 	await page.keyboard.press('Semicolon');
 	await page.waitForTimeout(800);
@@ -120,10 +104,8 @@ async function runMobile(baseUrl) {
 	const page = await context.newPage();
 	await bootToPlay(page, baseUrl);
 
-	const canvasBeforeMenu = await page.locator('canvas').boundingBox();
-	const viewport = page.viewportSize();
-
 	const canvasInPlay = await page.locator('canvas').boundingBox();
+	const viewport = page.viewportSize();
 	const widthRatio =
 		canvasInPlay && viewport ? canvasInPlay.width / viewport.width : 0;
 
@@ -132,8 +114,80 @@ async function runMobile(baseUrl) {
 		return play?.touchControls?.visible ? 1 : 0;
 	});
 
+	const beforeMove = await getPlayerPos(page);
+	const rightPoint = await page.evaluate(() => {
+		const game = window.__icarusGame;
+		const play = game?.scene.getScene('Play');
+		const coords = play?.touchControls?.tapTargets?.right;
+		if (!coords || !game?.canvas) return null;
+		const sm = game.scale;
+		const rect = game.canvas.getBoundingClientRect();
+		const scale = sm.displaySize.width / sm.width;
+		const offsetX = rect.left + (rect.width - sm.displaySize.width) / 2;
+		const offsetY = rect.top + (rect.height - sm.displaySize.height) / 2;
+		return {
+			x: offsetX + coords.x * scale,
+			y: offsetY + coords.y * scale,
+		};
+	});
+	if (rightPoint) {
+		await page.mouse.move(rightPoint.x, rightPoint.y);
+		await page.mouse.down();
+		await page.waitForTimeout(2500);
+		await page.mouse.up();
+	}
+	const afterMove = await getPlayerPos(page);
+	const touchMoveWorked = afterMove.x > beforeMove.x + 40;
+
+	const jumpPoint = await page.evaluate(() => {
+		const game = window.__icarusGame;
+		const play = game?.scene.getScene('Play');
+		const coords = play?.touchControls?.tapTargets?.jump;
+		if (!coords || !game?.canvas) return null;
+		const sm = game.scale;
+		const rect = game.canvas.getBoundingClientRect();
+		const scale = sm.displaySize.width / sm.width;
+		const offsetX = rect.left + (rect.width - sm.displaySize.width) / 2;
+		const offsetY = rect.top + (rect.height - sm.displaySize.height) / 2;
+		return {
+			x: offsetX + coords.x * scale,
+			y: offsetY + coords.y * scale,
+		};
+	});
+	await page.waitForTimeout(600);
+	await page.waitForFunction(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const body = play?.player?.sprite?.body;
+		return body?.touching?.down === true;
+	});
+	let touchJumpWorked = false;
+	if (jumpPoint) {
+		await page.mouse.move(jumpPoint.x, jumpPoint.y);
+		await page.mouse.down();
+		for (let i = 0; i < 12; i++) {
+			await page.waitForTimeout(50);
+			touchJumpWorked = await page.evaluate(() => {
+				const play = window.__icarusGame?.scene.getScene('Play');
+				const body = play?.player?.sprite?.body;
+				return (
+					(play?.player?.jumpCount ?? 0) > 0 ||
+					(body?.velocity?.y ?? 0) < -80
+				);
+			});
+			if (touchJumpWorked) break;
+		}
+		await page.mouse.up();
+	}
+
 	await browser.close();
-	return { widthRatio, touchButtonCount, canvasInPlay, viewport };
+	return {
+		widthRatio,
+		touchButtonCount,
+		touchMoveWorked,
+		touchJumpWorked,
+		canvasInPlay,
+		viewport,
+	};
 }
 
 async function main() {
@@ -150,11 +204,11 @@ async function main() {
 		!desktop.stuckOnGround &&
 		collidersStable &&
 		mobile.widthRatio > 0.85 &&
-		mobile.touchButtonCount === 1;
+		mobile.touchButtonCount === 1 &&
+		mobile.touchMoveWorked &&
+		mobile.touchJumpWorked;
 
-	console.log(
-		JSON.stringify({ desktop, mobile, pass }, null, 2),
-	);
+	console.log(JSON.stringify({ desktop, mobile, pass }, null, 2));
 	process.exit(pass ? 0 : 1);
 }
 
