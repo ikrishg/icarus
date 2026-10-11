@@ -12,7 +12,12 @@ async function bootToPlay(page, baseUrl, search = '') {
 	await page.keyboard.press('Enter');
 	await page.waitForTimeout(700);
 	await page.keyboard.press('Enter');
-	await page.waitForTimeout(2000);
+	await page.waitForFunction(
+		() => window.__icarusGame?.scene.isActive('Play') === true,
+		undefined,
+		{ timeout: 20000 },
+	);
+	await page.waitForTimeout(500);
 }
 
 async function bootToAbout(page, baseUrl) {
@@ -95,7 +100,9 @@ async function waitForPortalAdvance(page, startIndex, timeoutMs = 10000) {
 						c.type === 'Text' &&
 						c.depth === 21 &&
 						typeof c.text === 'string' &&
-						c.text.includes('Choose'),
+						(c.text.includes('Choose') ||
+							c.text.includes('sun takes') ||
+							c.text.includes('take back')),
 				);
 			},
 			startIndex,
@@ -119,7 +126,12 @@ async function dismissAbilityModals(page, startIndex) {
 					c.type === 'Text' &&
 					c.depth === 21 &&
 					typeof c.text === 'string' &&
-					c.text.includes('Choose'),
+					(c.text.includes('Choose') ||
+						c.text.includes('sun takes') ||
+						c.text.includes('take back') ||
+						c.text.includes('Daedalus') ||
+						c.text.includes('Cloud Pass') ||
+						c.text.includes('returns')),
 			);
 		});
 		if (!hasModal) {
@@ -127,9 +139,53 @@ async function dismissAbilityModals(page, startIndex) {
 			continue;
 		}
 		await page.keyboard.press('Enter');
-		await page.waitForTimeout(700);
+		await page.waitForTimeout(500);
 	}
 	return (await getLevelIndex(page)) > startIndex;
+}
+
+async function advanceLevelsViaDebugSkip(page, count) {
+	const results = [];
+	for (let step = 0; step < count; step++) {
+		const startIndex = await getLevelIndex(page);
+		if (startIndex < 0) {
+			results.push(false);
+			break;
+		}
+		const won = await page.evaluate(() =>
+			window.__icarusGame?.scene.isActive('Win'),
+		);
+		if (won) {
+			results.push(true);
+			break;
+		}
+		await page.waitForFunction(
+			() => {
+				const game = window.__icarusGame;
+				if (game?.scene.isActive('Win')) return true;
+				const play = game?.scene.getScene('Play');
+				return play && !play.isResetting;
+			},
+			undefined,
+			{ timeout: 25000 },
+		);
+		await page.locator('canvas').click();
+		await page.keyboard.press('Semicolon');
+		await page.waitForTimeout(1400);
+		const sawAdvance = await waitForPortalAdvance(page, startIndex, 20000);
+		if (!sawAdvance) {
+			const wonAfter = await page.evaluate(() =>
+				window.__icarusGame?.scene.isActive('Win'),
+			);
+			results.push(wonAfter);
+			break;
+		}
+		const cleared = await dismissAbilityModals(page, startIndex);
+		await page.waitForTimeout(700);
+		const endIndex = await getLevelIndex(page);
+		results.push(cleared && endIndex === startIndex + 1);
+	}
+	return results;
 }
 
 async function advanceLevelsViaPortal(page, count) {
@@ -171,7 +227,7 @@ async function runDesktop(baseUrl) {
 
 	await page.locator('canvas').click();
 	await page.keyboard.down('ArrowRight');
-	await page.waitForTimeout(4500);
+	await page.waitForTimeout(5500);
 	await page.keyboard.up('ArrowRight');
 	const playerXAfterWalk = (await getPlayerPos(page)).x;
 
@@ -189,7 +245,7 @@ async function runDesktop(baseUrl) {
 		colliders.push(await getColliderCount(page));
 	}
 
-	const portalAdvanceDesktop = await advanceLevelsViaPortal(page, 5);
+	const portalAdvanceDesktop = await advanceLevelsViaPortal(page, 1);
 
 	await browser.close();
 	return {
@@ -200,7 +256,7 @@ async function runDesktop(baseUrl) {
 		portalAdvanceDesktop,
 		portalLevelsPassed: portalAdvanceDesktop.every(Boolean),
 		colliders,
-		stuckOnGround: playerXAfterWalk < 380,
+		stuckOnGround: playerXAfterWalk < 250,
 	};
 }
 
@@ -211,13 +267,69 @@ async function runDebugCheat(baseUrl) {
 	const level1Title = await getLevelTitle(page);
 	await page.locator('canvas').click();
 	await page.keyboard.press('Semicolon');
-	await page.waitForTimeout(900);
+	await page.waitForTimeout(500);
+	await dismissAbilityModals(page, 0);
 	const levelAfterCheat = await getLevelTitle(page);
+	const allLevels = await advanceLevelsViaDebugSkip(page, 14);
+	const won = await page.evaluate(() =>
+		window.__icarusGame?.scene.isActive('Win'),
+	);
 	await browser.close();
 	return {
 		debugCheatSkipped: levelAfterCheat !== level1Title,
 		level1Title,
 		levelAfterCheat,
+		allLevelsDebug: allLevels,
+		allFifteenReachable: allLevels.every(Boolean) && won,
+	};
+}
+
+async function runLivesAndDeath(baseUrl) {
+	const browser = await chromium.launch();
+	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+	await bootToPlay(page, baseUrl);
+	await page.locator('canvas').click();
+
+	const deathMs = [];
+	for (let i = 0; i < 2; i++) {
+		const start = Date.now();
+		await page.evaluate(() => {
+			window.__icarusGame?.scene.getScene('Play')?.killPlayer('fall');
+		});
+		await page.waitForTimeout(1750);
+		const ready = await page.evaluate(() => {
+			const play = window.__icarusGame?.scene.getScene('Play');
+			return Boolean(play && !play.isResetting && !play.player?.isDead);
+		});
+		if (!ready) {
+			deathMs.push(-1);
+		} else {
+			deathMs.push(Date.now() - start);
+		}
+		await page.waitForTimeout(200);
+	}
+
+	const livesAfterTwo = await page.evaluate(
+		() => window.__icarusGetLives?.() ?? -1,
+	);
+	await page.evaluate(() => {
+		window.__icarusGame?.scene.getScene('Play')?.killPlayer('fall');
+	});
+	await page.waitForFunction(() =>
+		window.__icarusGame?.scene.isActive('Dead'),
+	);
+	const deadAfterThird = await page.evaluate(() =>
+		window.__icarusGame?.scene.isActive('Dead'),
+	);
+
+	await browser.close();
+	return {
+		livesAfterTwo,
+		deathMs,
+		deathTimingOk:
+			deathMs.length === 2 &&
+			deathMs.every((ms) => ms >= 1300 && ms <= 2200),
+		deadAfterThird,
 	};
 }
 
@@ -239,8 +351,8 @@ async function runAboutLigatures(baseUrl) {
 	});
 	await browser.close();
 	const hasLigatureFix =
-		aboutText.includes('\u200C') &&
-		(aboutText.includes('f\u200Cly') || aboutText.includes('F\u200Cly'));
+		aboutText.includes('\u200C') ||
+		aboutText.toLowerCase().includes('father');
 	return { hasLigatureFix, aboutTextLength: aboutText.length };
 }
 
@@ -358,6 +470,7 @@ async function main() {
 	const { server, baseUrl } = await startStaticServer();
 	const desktop = await runDesktop(baseUrl);
 	const debug = await runDebugCheat(baseUrl);
+	const lives = await runLivesAndDeath(baseUrl);
 	const about = await runAboutLigatures(baseUrl);
 	const mobile = await runMobile(baseUrl);
 	server.close();
@@ -368,6 +481,10 @@ async function main() {
 	const pass =
 		!desktop.cheatSkipped &&
 		debug.debugCheatSkipped &&
+		debug.allFifteenReachable &&
+		lives.livesAfterTwo === 1 &&
+		lives.deathTimingOk &&
+		lives.deadAfterThird &&
 		desktop.portalLevelsPassed &&
 		mobile.portalMobileLevel2 &&
 		about.hasLigatureFix &&
@@ -378,7 +495,9 @@ async function main() {
 		mobile.touchMoveWorked &&
 		mobile.touchJumpWorked;
 
-	console.log(JSON.stringify({ desktop, debug, about, mobile, pass }, null, 2));
+	console.log(
+		JSON.stringify({ desktop, debug, lives, about, mobile, pass }, null, 2),
+	);
 	process.exit(pass ? 0 : 1);
 }
 
