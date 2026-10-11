@@ -1,6 +1,7 @@
 import { type GameObjects, Scene } from 'phaser';
 import { BackgroundManager } from '../components/Background';
 import { HEIGHT, WIDTH } from '../util/constants';
+import { PALETTE } from '../util/palette';
 import { sanitizePixelFont } from '../util/text';
 
 export class About extends Scene {
@@ -15,7 +16,6 @@ export class About extends Scene {
 	}
 
 	create() {
-		// Play menu music if not already playing
 		if (!this.sound.get('instruments')?.isPlaying) {
 			this.sound.stopAll();
 			const music = this.sound.add('instruments', { loop: true, volume: 0.5 });
@@ -25,9 +25,8 @@ export class About extends Scene {
 		this.backgroundManager = new BackgroundManager(this);
 
 		this.backdrop = this.add
-			.rectangle(0, 0, WIDTH, HEIGHT, 0x000000)
+			.rectangle(0, 0, WIDTH, HEIGHT, PALETTE.deep, 0.85)
 			.setOrigin(0, 0)
-			.setAlpha(0.8)
 			.setDepth(3);
 
 		const leftPadding = 64;
@@ -53,7 +52,10 @@ export class About extends Scene {
 				leftPadding,
 				bodyY,
 				sanitizePixelFont(
-					`The fall of Icarus, the legendary Icarus who dared to fly too close to the sun with wings made of feathers and wax, is a timeless tale of ambition, hubris, and the consequences of overreaching one's limits. Crafted in the spirit of classic arcade games, this project is a tribute to the enduring allure of myth and the thrill of adventure. This game is one where you go through a platformer but have to lose one ability each level. On blessing levels (5, 12, 16, 22, and 27) you can regain up to three abilities you lost. Choose carefully, or you might have to restart from the beginning!`,
+					`Icarus flies toward the sun on wings of feathers and wax.
+Every few levels the heat takes something. You choose what to give up: feathers, sight, speed, the way home, or your father's bow.
+Five times, the sky gives a little back. Spend it well. Reach the sun.
+Arrows or WASD to move. Up, W or Space to jump. Q to dash. E to shoot. Shift+R restarts the level.`,
 				),
 				{
 					font: `${bodyFontSize}px Pixelify Sans`,
@@ -66,19 +68,12 @@ export class About extends Scene {
 			.setOrigin(0, 0)
 			.setDepth(4);
 
-		const hintFontSize = 40;
-
 		this.clickHint = this.add
-			.text(
-				WIDTH - 24,
-				HEIGHT - 18,
-				'click anywhere or press any key to go back',
-				{
-					font: `${hintFontSize}px Pixelify Sans`,
-					color: '#ffffff',
-					align: 'right',
-				},
-			)
+			.text(WIDTH - 64, HEIGHT - 64, 'Press any key to go back', {
+				font: '48px Pixelify Sans',
+				color: '#ffffff',
+				align: 'right',
+			})
 			.setOrigin(1, 1)
 			.setAlpha(0.95)
 			.setDepth(4);

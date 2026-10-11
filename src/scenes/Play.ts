@@ -10,13 +10,21 @@ import {
 	DEPTH_PLAY_HUD_TEXT,
 	PLAY_HUD_CLEARANCE_Y,
 } from '../util/constants';
+import { DeathSequence, type DeathCause } from '../components/DeathSequence';
 import { isDebugPlayEnabled } from '../util/debug';
+import {
+	ABILITY_LOSS_LINE,
+	ABILITY_MYTH_NAME,
+	abilityStateLine,
+	regainLevelTitle,
+} from '../util/abilityCopy';
+import { PALETTE_HEX } from '../util/palette';
 import { sanitizePixelFont } from '../util/text';
 
 const ABILITY_CARD_FILL = 0xd6c9b6;
 const ABILITY_CARD_INK = 0x442d32;
 const ABILITY_CARD_INK_HEX = `#${ABILITY_CARD_INK.toString(16).padStart(6, '0')}`;
-const ABILITY_LOSS_EFFECT_HEX = '#8b3333';
+const ABILITY_LOSS_EFFECT_HEX = PALETTE_HEX.lossEffect;
 const ABILITY_CARD_GOLD = 0xffdd00;
 const ABILITY_ICON_MAX = 120;
 
@@ -90,16 +98,25 @@ export class Play extends Scene {
 	visionOverlay: Phaser.GameObjects.Rectangle;
 	touchControls: TouchControls;
 	instructionText?: Phaser.GameObjects.Text;
+	lives = 3;
+	giftsLost = 0;
+	livesText?: Phaser.GameObjects.Text;
+	deathSequence?: DeathSequence;
 	private colliders: Phaser.Physics.Arcade.Collider[] = [];
 	private escKeyHandler?: () => void;
 	private restartKeyHandler?: (event: KeyboardEvent) => void;
 	private skipKeyHandler?: () => void;
+	private pausePanel?: Phaser.GameObjects.Container;
+	private isPaused = false;
+	private runEndedOnDeath = false;
 
 	constructor() {
 		super('Play');
 	}
 
 	init() {
+		this.lives = 3;
+		this.giftsLost = 0;
 		this.resetRunState();
 	}
 
@@ -142,7 +159,10 @@ export class Play extends Scene {
 			.setAlpha(this.abilityManager.getVisionAlpha());
 
 		this.setupLevelColliders();
+		this.deathSequence = new DeathSequence(this, this.player);
+		this.createLivesHud();
 		window.__icarusGetColliders = () => this.colliders.length;
+		window.__icarusGetLives = () => this.lives;
 		this.playBattleMusic();
 		this.showLevelInstruction();
 
@@ -153,13 +173,15 @@ export class Play extends Scene {
 		});
 
 		this.escKeyHandler = () => {
-			this.sound.stopAll();
-			this.scene.start('Menu');
+			if (this.deathSequence?.isEscBlocked()) return;
+			if (this.isResetting) return;
+			this.togglePause();
 		};
 		this.input.keyboard?.on('keydown-ESC', this.escKeyHandler);
 
 		if (isDebugPlayEnabled()) {
 			this.skipKeyHandler = () => {
+				if (this.scene.isActive('Win')) return;
 				if (!this.isResetting) {
 					this.completeLevel();
 				}
@@ -168,8 +190,8 @@ export class Play extends Scene {
 		}
 
 		this.restartKeyHandler = (event: KeyboardEvent) => {
-			if (event.shiftKey && !this.isResetting) {
-				this.killPlayer();
+			if (event.shiftKey && !this.isResetting && !this.isPaused) {
+				this.killPlayer('fall', { fast: true, spendLife: false });
 			}
 		};
 		this.input.keyboard?.on('keydown-R', this.restartKeyHandler);
@@ -194,9 +216,18 @@ export class Play extends Scene {
 			this.input.keyboard?.off('keydown-SEMICOLON', this.skipKeyHandler);
 		}
 		delete window.__icarusGetColliders;
+		delete window.__icarusGetLives;
 	}
 
 	update() {
+		if (this.isPaused) return;
+		if (this.deathSequence?.consumeJumpBuffer()) {
+			const maxJumps = this.abilityManager.getMaxJumps();
+			if (maxJumps > 0 && this.player.jumpCount < maxJumps) {
+				this.player.sprite.setVelocityY(this.player.JUMP_VELOCITY);
+				this.player.jumpCount++;
+			}
+		}
 		this.player.update();
 
 		// Update vision overlay
@@ -210,14 +241,14 @@ export class Play extends Scene {
 				this.physics.overlap(this.player.sprite, fireball.sprite)
 			) {
 				if (!this.player.isDead && !this.isResetting) {
-					this.killPlayer();
+					this.killPlayer('fire');
 				}
 				break;
 			}
 		}
 
 		if (this.player?.sprite.y > this.cameras.main.height + 100) {
-			this.killPlayer();
+			this.killPlayer('fall');
 		}
 	}
 
@@ -228,7 +259,7 @@ export class Play extends Scene {
 		const levelIndex = this.levelManager.currentIndex;
 		let musicKey: string;
 
-		if (levelIndex < 14) {
+		if (levelIndex < 10) {
 			musicKey = 'battle-beats';
 		} else {
 			musicKey = 'battle-climax';
@@ -247,19 +278,54 @@ export class Play extends Scene {
 		}
 	}
 
-	killPlayer() {
+	killPlayer(
+		cause: DeathCause = 'fall',
+		options: { fast?: boolean; spendLife?: boolean } = {},
+	) {
 		if (!this.player || this.player.isDead || this.isResetting) return;
+		if (!this.deathSequence) return;
 
-		this.player.die();
+		const fast = options.fast === true;
+		const spendLife = options.spendLife !== false;
+
+		this.clearLevelInstruction();
+		this.levelManager.setHudVisible(false);
 		this.isResetting = true;
-
-		// Play death sound
 		this.sound.play('death', { volume: 0.6 });
 
-		this.cameras.main.flash(300, 255, 0, 0);
-
-		this.time.delayedCall(1500, () => {
-			this.restartCurrentLevel();
+		this.runEndedOnDeath = false;
+		const finishDeath = () => {
+			this.levelManager.setHudVisible(true);
+			this.isResetting = false;
+			if (this.runEndedOnDeath) {
+				this.scene.start('Dead');
+			}
+		};
+		this.deathSequence.run(cause, {
+			fast,
+			onRebuild: () => {
+				if (spendLife) {
+					this.lives -= 1;
+					this.updateLivesHud();
+					if (this.lives <= 0) {
+						this.runEndedOnDeath = true;
+						this.abilityManager.reset();
+						this.giftsLost = 0;
+						this.lives = 3;
+						this.updateLivesHud();
+						this.levelManager.goto(0);
+					}
+				}
+				this.restartCurrentLevel();
+			},
+			onComplete: () => {
+				finishDeath();
+			},
+		});
+		this.time.delayedCall(fast ? 800 : 1850, () => {
+			if (this.isResetting) {
+				finishDeath();
+			}
 		});
 	}
 
@@ -297,6 +363,7 @@ export class Play extends Scene {
 
 	completeLevel() {
 		if (this.isResetting) return;
+		this.clearLevelInstruction();
 		this.isResetting = true;
 
 		// Play success sound
@@ -345,9 +412,10 @@ export class Play extends Scene {
 	}
 
 	showWinScreen() {
+		this.isResetting = false;
 		this.levelManager.goto(0);
 		this.resetPlayer();
-		this.scene.switch('Win', { totalLevels: this.levelManager.levels.length });
+		this.scene.switch('Win', { giftsLost: this.giftsLost });
 	}
 
 	setupLevelColliders() {
@@ -370,7 +438,7 @@ export class Play extends Scene {
 						physicsObj,
 						() => {
 							if (!this.player.isDead && !this.isResetting) {
-								this.killPlayer();
+								this.killPlayer('spikes');
 							}
 						},
 						undefined,
@@ -438,42 +506,129 @@ export class Play extends Scene {
 		this.setupLevelColliders();
 	}
 
+	createLivesHud() {
+		this.livesText?.destroy();
+		this.livesText = this.add
+			.text(24, PLAY_HUD_CLEARANCE_Y + 8, this.livesLabel(), {
+				fontFamily: 'Pixelify Sans',
+				fontSize: '40px',
+				color: '#fdfdfe',
+				stroke: PALETTE_HEX.deep,
+				strokeThickness: 3,
+			})
+			.setOrigin(0, 0)
+			.setDepth(DEPTH_PLAY_HUD_TEXT);
+	}
+
+	livesLabel(): string {
+		return `Lives: ${this.lives}`;
+	}
+
+	updateLivesHud() {
+		this.livesText?.setText(this.livesLabel());
+	}
+
+	togglePause() {
+		if (this.pausePanel) {
+			this.closePause();
+			return;
+		}
+		this.isPaused = true;
+		this.physics.pause();
+		this.pausePanel = this.add.container(0, 0).setDepth(250);
+		const bg = this.add
+			.rectangle(
+				this.cameras.main.width / 2,
+				this.cameras.main.height / 2,
+				this.cameras.main.width,
+				this.cameras.main.height,
+				0x0b1a2e,
+				0.75,
+			)
+			.setInteractive();
+		const title = this.add
+			.text(this.cameras.main.width / 2, this.cameras.main.height / 2 - 40, 'Paused', {
+				fontFamily: 'Pixelify Sans',
+				fontSize: '72px',
+				color: '#ffdd00',
+			})
+			.setOrigin(0.5);
+		const hint = this.add
+			.text(
+				this.cameras.main.width / 2,
+				this.cameras.main.height / 2 + 40,
+				'Esc: Resume   |   Q: Quit to menu',
+				{
+					fontFamily: 'Pixelify Sans',
+					fontSize: '36px',
+					color: '#fdfdfe',
+				},
+			)
+			.setOrigin(0.5);
+		this.pausePanel.add([bg, title, hint]);
+		const resume = this.input.keyboard?.addKey(
+			Phaser.Input.Keyboard.KeyCodes.ESC,
+		);
+		const quit = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
+		resume?.once('down', () => this.closePause());
+		quit?.once('down', () => {
+			this.closePause();
+			this.sound.stopAll();
+			this.scene.start('Menu');
+		});
+	}
+
+	closePause() {
+		this.pausePanel?.destroy();
+		this.pausePanel = undefined;
+		this.isPaused = false;
+		this.physics.resume();
+	}
+
 	showLevelInstruction() {
 		this.clearLevelInstruction();
 		const lvl = this.levelManager.current;
 		const instruction = sanitizePixelFont(
-			lvl.instruction ?? 'Reach the portal to complete!',
+			lvl.instruction ?? 'Reach the portal.',
 		);
 
-		this.instructionText = this.add
-			.text(
+		const panelY = PLAY_HUD_CLEARANCE_Y + 72;
+		const panel = this.add
+			.rectangle(
 				this.cameras.main.width / 2,
-				this.cameras.main.height / 2 - 50,
-				instruction,
-				{
-					fontFamily: 'Pixelify Sans',
-					fontSize: '64px',
-					color: '#ffffff',
-					stroke: '#1b1b1c',
-					strokeThickness: 12,
-					align: 'center',
-					lineSpacing: 8,
-					wordWrap: {
-						useAdvancedWrap: true,
-						width: this.cameras.main.width - 200,
-					},
-				},
+				panelY,
+				this.cameras.main.width - 120,
+				120,
+				0x0b1a2e,
+				0.75,
 			)
+			.setDepth(14);
+
+		this.instructionText = this.add
+			.text(this.cameras.main.width / 2, panelY, instruction, {
+				fontFamily: 'Pixelify Sans',
+				fontSize: '48px',
+				color: '#fdfdfe',
+				stroke: PALETTE_HEX.deep,
+				strokeThickness: 2,
+				align: 'center',
+				lineSpacing: 8,
+				wordWrap: {
+					useAdvancedWrap: true,
+					width: this.cameras.main.width - 200,
+				},
+			})
 			.setOrigin(0.5)
 			.setDepth(15);
 
 		// Fade out instruction message
 		this.tweens.add({
-			targets: this.instructionText,
+			targets: [panel, this.instructionText],
 			alpha: 0,
 			duration: 1500,
 			delay: 2000,
 			onComplete: () => {
+				panel.destroy();
 				this.instructionText?.destroy();
 				this.instructionText = undefined;
 			},
@@ -481,8 +636,9 @@ export class Play extends Scene {
 	}
 
 	showAbilityChoiceScreen() {
+		this.clearLevelInstruction();
+		this.levelManager.setHudVisible(false);
 		this.touchControls?.setGameplayVisible(false);
-		// Disable player controls during choice
 		this.player.controlsEnabled = false;
 
 		// Create choice screen
@@ -499,43 +655,31 @@ export class Play extends Scene {
 			.setInteractive();
 
 		const title = this.add
-			.text(this.cameras.main.width / 2, 80, 'Choose an ability to lose:', {
-				fontFamily: 'Pixelify Sans',
-				fontSize: '64px',
-				color: '#e9591c',
-				stroke: '#000000',
-				strokeThickness: 8,
-				align: 'center',
-			})
-			.setOrigin(0.5)
-			.setDepth(21);
-
-		this.add
 			.text(
 				this.cameras.main.width / 2,
-				160,
-				'Tap a card or use arrow keys + Enter to choose',
+				80,
+				sanitizePixelFont('The sun takes a gift.'),
 				{
 					fontFamily: 'Pixelify Sans',
-					fontSize: '32px',
-					color: '#ffffff',
+					fontSize: '64px',
+					color: '#e9591c',
+					stroke: PALETTE_HEX.deep,
+					strokeThickness: 4,
 					align: 'center',
 				},
 			)
 			.setOrigin(0.5)
 			.setDepth(21);
 
-		// Map abilities to their visual icons and effect descriptions
 		const abilityData: Array<{
 			key: keyof PlayerAbilities;
 			icon: string;
-			effect: string;
 		}> = [
-			{ key: 'jumpLevel', icon: 'flight', effect: 'Reduced jump height/count' },
-			{ key: 'visionLevel', icon: 'vision', effect: 'Screen becomes darker' },
-			{ key: 'dashLevel', icon: 'dash', effect: 'Slower movement speed' },
-			{ key: 'canMoveLeft', icon: 'left', effect: 'Cannot move left anymore' },
-			{ key: 'canShootArrows', icon: 'bow', effect: 'Cannot shoot arrows' },
+			{ key: 'jumpLevel', icon: 'flight' },
+			{ key: 'visionLevel', icon: 'vision' },
+			{ key: 'dashLevel', icon: 'dash' },
+			{ key: 'canMoveLeft', icon: 'left' },
+			{ key: 'canShootArrows', icon: 'bow' },
 		];
 
 		const startY = 320;
@@ -548,6 +692,22 @@ export class Play extends Scene {
 			if (typeof currentValue === 'boolean' && currentValue) return true;
 			return false;
 		});
+
+		if (downgradeable.length === 0) {
+			this.player.controlsEnabled = true;
+			this.touchControls?.setGameplayVisible(true);
+			this.levelManager.setHudVisible(true);
+			const hasNext = this.levelManager.next();
+			if (!hasNext) {
+				this.showWinScreen();
+			} else {
+				this.resetPlayer();
+				this.playBattleMusic();
+				this.showLevelInstruction();
+				this.isResetting = false;
+			}
+			return;
+		}
 
 		const buttons: Phaser.GameObjects.Rectangle[] = [];
 		let selectedIndex = 0;
@@ -581,15 +741,9 @@ export class Play extends Scene {
 
 			addAbilityIcon(this, x, y, data.icon);
 
-			// Add ability name
+			const myth = ABILITY_MYTH_NAME[data.key];
 			this.add
-				.text(
-					x,
-					y + 60,
-					sanitizePixelFont(
-						this.abilityManager.getAbilityDescription(data.key),
-					),
-					{
+				.text(x, y + 50, sanitizePixelFont(myth), {
 					fontFamily: 'Pixelify Sans',
 					fontSize: '28px',
 					color: ABILITY_CARD_INK_HEX,
@@ -599,19 +753,57 @@ export class Play extends Scene {
 				.setOrigin(0.5)
 				.setDepth(22);
 
-			// Add effect description
 			this.add
-				.text(x, y + 110, sanitizePixelFont(data.effect), {
+				.text(
+					x,
+					y + 88,
+					sanitizePixelFont(
+						abilityStateLine(data.key, this.abilityManager.abilities),
+					),
+					{
+						fontFamily: 'Pixelify Sans',
+						fontSize: '22px',
+						color: ABILITY_CARD_INK_HEX,
+						align: 'center',
+						wordWrap: { width: boxSize - 20 },
+					},
+				)
+				.setOrigin(0.5)
+				.setDepth(22);
+
+			this.add
+				.text(x, y + 128, sanitizePixelFont(ABILITY_LOSS_LINE[data.key]), {
 					fontFamily: 'Pixelify Sans',
-					fontSize: '20px',
+					fontSize: '22px',
 					color: ABILITY_LOSS_EFFECT_HEX,
 					align: 'center',
 					wordWrap: { width: boxSize - 20 },
 				})
 				.setOrigin(0.5)
 				.setDepth(22);
-
 		});
+
+		const helperY =
+			startY +
+			Math.ceil(downgradeable.length / cols) * (boxSize + spacing) +
+			24;
+		this.add
+			.text(
+				this.cameras.main.width / 2,
+				helperY,
+				sanitizePixelFont(
+					'Choose what you give up. Arrow keys and Enter, or tap.',
+				),
+				{
+					fontFamily: 'Pixelify Sans',
+					fontSize: '32px',
+					color: PALETTE_HEX.cardHelper,
+					align: 'center',
+					wordWrap: { width: this.cameras.main.width - 120 },
+				},
+			)
+			.setOrigin(0.5)
+			.setDepth(21);
 
 		// Function to update visual selection
 		const updateSelection = () => {
@@ -633,15 +825,14 @@ export class Play extends Scene {
 			} else {
 				this.abilityManager.abilities[abilityKey] = false as never;
 			}
+			this.giftsLost += 1;
 
-			// Re-enable player controls
 			this.player.controlsEnabled = true;
 			this.touchControls?.setGameplayVisible(true);
+			this.levelManager.setHudVisible(true);
 
-			// Clean up keyboard listener
 			this.input.keyboard?.off('keydown', keyHandler);
 
-			// Clean up choice screen
 			bg.destroy();
 			title.destroy();
 			this.children.list
@@ -688,10 +879,15 @@ export class Play extends Scene {
 
 		this.input.keyboard?.on('keydown', keyHandler);
 		updateSelection();
+
+		if (isDebugPlayEnabled() && buttons.length > 0) {
+			this.time.delayedCall(80, () => selectAbility());
+		}
 	}
 	showAbilityGainScreen() {
+		this.clearLevelInstruction();
+		this.levelManager.setHudVisible(false);
 		this.touchControls?.setGameplayVisible(false);
-		// Disable player controls during choice
 		this.player.controlsEnabled = false;
 
 		// Create gain screen
@@ -754,36 +950,19 @@ export class Play extends Scene {
 			return;
 		}
 
-		const titleText =
-			maxSelections === 1
-				? 'Choose 1 ability to regain:'
-				: `Choose ${maxSelections} abilities to regain:`;
+		const titleText = sanitizePixelFont(
+			regainLevelTitle(this.levelManager.currentIndex),
+		);
 
 		const title = this.add
 			.text(this.cameras.main.width / 2, 80, titleText, {
 				fontFamily: 'Pixelify Sans',
 				fontSize: '64px',
 				color: '#afa843',
-				stroke: '#000000',
-				strokeThickness: 8,
+				stroke: PALETTE_HEX.deep,
+				strokeThickness: 4,
 				align: 'center',
 			})
-			.setOrigin(0.5)
-			.setDepth(21);
-
-		this.add
-			.text(
-				this.cameras.main.width / 2,
-				160,
-				'Tap cards or use arrow keys + Enter — pick each regain in turn',
-				{
-					fontFamily: 'Pixelify Sans',
-					fontSize: '32px',
-					color: '#ffffff',
-					align: 'center',
-					wordWrap: { width: this.cameras.main.width - 120 },
-				},
-			)
 			.setOrigin(0.5)
 			.setDepth(21);
 
@@ -880,45 +1059,88 @@ export class Play extends Scene {
 			button.setData('selected', true);
 			selectedAbilities++;
 
+			this.add
+				.text(button.x, button.y - 100, 'Returned', {
+					fontFamily: 'Pixelify Sans',
+					fontSize: '24px',
+					color: ABILITY_CARD_INK_HEX,
+				})
+				.setOrigin(0.5)
+				.setDepth(23);
+
 			if (selectedAbilities >= maxSelections) {
-				// Wait a moment then continue
-				this.time.delayedCall(1000, () => {
-					// Re-enable player controls
-					this.player.controlsEnabled = true;
-					this.touchControls?.setGameplayVisible(true);
-
-					// Clean up keyboard listener
-					this.input.keyboard?.off('keydown', keyHandler);
-
-					// Clean up gain screen
-					bg.destroy();
-					title.destroy();
-					this.children.list
-						.filter((child) => {
-							const depth = (
-								child as Phaser.GameObjects.GameObject & { depth: number }
-							).depth;
-							return depth === 21 || depth === 22;
-						})
-						.forEach((child) => {
-							child.destroy();
-						});
-
-					// Continue to next level
-					const hasNext = this.levelManager.next();
-					if (!hasNext) {
-						this.showWinScreen();
-					} else {
-						this.resetPlayer();
-						this.playBattleMusic();
-						this.showLevelInstruction();
-						this.isResetting = false;
-					}
-				});
+				this.time.delayedCall(600, () => finishGain());
 			}
 		};
 
-		// Set up keyboard navigation
+		const finishGain = () => {
+			this.player.controlsEnabled = true;
+			this.touchControls?.setGameplayVisible(true);
+			this.levelManager.setHudVisible(true);
+			this.input.keyboard?.off('keydown', keyHandler);
+			bg.destroy();
+			title.destroy();
+			this.children.list
+				.filter((child) => {
+					const depth = (
+						child as Phaser.GameObjects.GameObject & { depth: number }
+					).depth;
+					return depth === 21 || depth === 22 || depth === 23;
+				})
+				.forEach((child) => {
+					child.destroy();
+				});
+			const hasNext = this.levelManager.next();
+			if (!hasNext) {
+				this.showWinScreen();
+			} else {
+				this.resetPlayer();
+				this.playBattleMusic();
+				this.showLevelInstruction();
+				this.isResetting = false;
+			}
+		};
+
+		const helperY =
+			startY +
+			Math.ceil(upgradeableAbilities.length / cols) * (boxSize + spacing) +
+			16;
+		this.add
+			.text(
+				this.cameras.main.width / 2,
+				helperY,
+				sanitizePixelFont(
+					maxSelections === 1
+						? 'Choose 1 to take back.'
+						: `Choose ${maxSelections} to take back.`,
+				),
+				{
+					fontFamily: 'Pixelify Sans',
+					fontSize: '32px',
+					color: PALETTE_HEX.cardHelper,
+					align: 'center',
+				},
+			)
+			.setOrigin(0.5)
+			.setDepth(21);
+		this.add
+			.text(
+				this.cameras.main.width / 2,
+				helperY + 44,
+				sanitizePixelFont(
+					'Pick one. Arrow keys and Enter, or tap. Shift+Enter when done.',
+				),
+				{
+					fontFamily: 'Pixelify Sans',
+					fontSize: '28px',
+					color: '#fdfdfe',
+					align: 'center',
+					wordWrap: { width: this.cameras.main.width - 120 },
+				},
+			)
+			.setOrigin(0.5)
+			.setDepth(21);
+
 		const keyHandler = (event: KeyboardEvent) => {
 			if (event.code === 'ArrowLeft' || event.code === 'KeyA') {
 				selectedIndex = Math.max(0, selectedIndex - 1);
@@ -932,6 +1154,12 @@ export class Play extends Scene {
 			} else if (event.code === 'ArrowDown' || event.code === 'KeyS') {
 				selectedIndex = Math.min(buttons.length - 1, selectedIndex + cols);
 				updateSelection();
+			} else if (
+				event.shiftKey &&
+				(event.code === 'Enter' || event.code === 'Space') &&
+				selectedAbilities >= 1
+			) {
+				finishGain();
 			} else if (event.code === 'Enter' || event.code === 'Space') {
 				selectAbility();
 			}
@@ -939,5 +1167,28 @@ export class Play extends Scene {
 
 		this.input.keyboard?.on('keydown', keyHandler);
 		updateSelection();
+
+		if (isDebugPlayEnabled() && buttons.length > 0) {
+			let autoPicks = 0;
+			const autoPick = () => {
+				if (autoPicks >= maxSelections) return;
+				const nextIdx = buttons.findIndex((b) => !b.getData('selected'));
+				if (nextIdx < 0) {
+					finishGain();
+					return;
+				}
+				selectedIndex = nextIdx;
+				updateSelection();
+				selectAbility();
+				autoPicks += 1;
+				if (
+					autoPicks < maxSelections &&
+					buttons.some((b) => !b.getData('selected'))
+				) {
+					this.time.delayedCall(120, autoPick);
+				}
+			};
+			this.time.delayedCall(120, autoPick);
+		}
 	}
 }

@@ -1,5 +1,10 @@
 import { Scene } from 'phaser';
 import { HEIGHT, WIDTH } from '../util/constants';
+import { PALETTE } from '../util/palette';
+import {
+	registerDeathAnimations,
+	registerDeathPlaceholderTextures,
+} from '../util/generateDeathAssets';
 
 export class Preloader extends Scene {
 	constructor() {
@@ -16,12 +21,13 @@ export class Preloader extends Scene {
 		// Background color
 		this.cameras.main.setBackgroundColor('#1b1b1c');
 
-		// Loading text
+		this.load.image('wordmark', 'assets/wordmark.webp');
+
 		const loadingText = this.add
-			.text(WIDTH / 2, barY - 80, 'LOADING...', {
+			.text(WIDTH / 2, barY - 120, 'LOADING...', {
 				fontFamily: 'Pixelify Sans',
 				fontSize: '48px',
-				color: '#ffffff',
+				color: '#fdfdfe',
 			})
 			.setOrigin(0.5);
 
@@ -54,7 +60,7 @@ export class Preloader extends Scene {
 		// Update progress bar
 		this.load.on('progress', (value: number) => {
 			progressBar.clear();
-			progressBar.fillStyle(0xffffff, 1);
+			progressBar.fillStyle(PALETTE.sunGold, 1);
 			progressBar.fillRect(
 				barX + 4,
 				barY + 4,
@@ -133,7 +139,16 @@ export class Preloader extends Scene {
 	}
 
 	create() {
-		// Create animations
+		if (this.textures.exists('wordmark')) {
+			this.add
+				.image(WIDTH / 2, HEIGHT / 2 - 160, 'wordmark')
+				.setDepth(1)
+				.setAlpha(0.9);
+		}
+
+		registerDeathPlaceholderTextures(this);
+		registerDeathAnimations(this);
+
 		if (!this.anims.exists('player-idle')) {
 			this.anims.create({
 				key: 'player-idle',

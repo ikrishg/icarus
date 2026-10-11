@@ -1,6 +1,8 @@
 import { type GameObjects, Scene } from 'phaser';
 import { BackgroundManager } from '../components/Background';
 import { HEIGHT, WIDTH } from '../util/constants';
+import { PALETTE } from '../util/palette';
+import { sanitizePixelFont } from '../util/text';
 
 export class Credits extends Scene {
 	backgroundManager: BackgroundManager;
@@ -14,7 +16,6 @@ export class Credits extends Scene {
 	}
 
 	create() {
-		// Play menu music if not already playing
 		if (!this.sound.get('instruments')?.isPlaying) {
 			this.sound.stopAll();
 			const music = this.sound.add('instruments', { loop: true, volume: 0.5 });
@@ -24,9 +25,8 @@ export class Credits extends Scene {
 		this.backgroundManager = new BackgroundManager(this);
 
 		this.backdrop = this.add
-			.rectangle(0, 0, WIDTH, HEIGHT, 0x000000)
+			.rectangle(0, 0, WIDTH, HEIGHT, PALETTE.deep, 0.85)
 			.setOrigin(0, 0)
-			.setAlpha(0.8)
 			.setDepth(3);
 
 		const leftPadding = 64;
@@ -51,9 +51,11 @@ export class Credits extends Scene {
 			.text(
 				leftPadding,
 				bodyY,
-				`Made by Krish Gupta (krishg.com).
-Read the readme on GitHub for more info on things such as assets.
-(ikrishg/icarus)`,
+				sanitizePixelFont(
+					`Made by Krish Gupta. krishg.com
+Art: Sprite. Music and sound: see README
+Source: github.com/ikrishg/icarus`,
+				),
 				{
 					font: `${bodyFontSize}px Pixelify Sans`,
 					color: '#ffffff',
@@ -65,19 +67,12 @@ Read the readme on GitHub for more info on things such as assets.
 			.setOrigin(0, 0)
 			.setDepth(4);
 
-		const hintFontSize = 40;
-
 		this.clickHint = this.add
-			.text(
-				WIDTH - 24,
-				HEIGHT - 18,
-				'click anywhere or press any key to go back',
-				{
-					font: `${hintFontSize}px Pixelify Sans`,
-					color: '#ffffff',
-					align: 'right',
-				},
-			)
+			.text(WIDTH - 64, HEIGHT - 64, 'Press any key to go back', {
+				font: '48px Pixelify Sans',
+				color: '#ffffff',
+				align: 'right',
+			})
 			.setOrigin(1, 1)
 			.setAlpha(0.95)
 			.setDepth(4);
