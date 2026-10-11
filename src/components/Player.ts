@@ -1,6 +1,7 @@
 import type { Scene } from 'phaser';
 import type { AbilityManager } from './AbilityManager';
 import { Arrow } from './Arrow';
+import type { TouchControls } from './TouchControls';
 
 export class Player {
 	scene: Scene;
@@ -34,6 +35,7 @@ export class Player {
 	lastDashTime = 0;
 	readonly DASH_COOLDOWN = 1000; // ms between dashes
 	controlsEnabled = true; // Can be disabled during ability choice screens
+	touchControls: TouchControls | null = null;
 
 	constructor(
 		scene: Scene,
@@ -90,6 +92,9 @@ export class Player {
 	update() {
 		if (!this.sprite.body || this.isDead || !this.controlsEnabled) return;
 
+		this.touchControls?.beginFrame();
+		const touch = this.touchControls?.getInput();
+
 		const body = this.sprite.body as Phaser.Physics.Arcade.Body;
 
 		// Reset jump count when touching ground
@@ -99,10 +104,10 @@ export class Player {
 		}
 
 		// Check for dash input BEFORE movement
-		if (
-			this.abilityManager.canDash() &&
-			Phaser.Input.Keyboard.JustDown(this.qKey as Phaser.Input.Keyboard.Key)
-		) {
+		const dashPressed =
+			Phaser.Input.Keyboard.JustDown(this.qKey as Phaser.Input.Keyboard.Key) ||
+			touch?.dashJustDown;
+		if (this.abilityManager.canDash() && dashPressed) {
 			const now = Date.now();
 			if (now - this.lastDashTime > this.DASH_COOLDOWN) {
 				this.performDash();
@@ -120,11 +125,16 @@ export class Player {
 			return; // Skip normal movement during dash
 		}
 
+		const leftDown =
+			this.cursors?.left.isDown || this.wasd?.left.isDown || touch?.left;
+		const rightDown =
+			this.cursors?.right.isDown || this.wasd?.right.isDown || touch?.right;
+
 		// Horizontal movement
-		if ((this.cursors?.left.isDown || this.wasd?.left.isDown) && canMoveLeft) {
+		if (leftDown && canMoveLeft) {
 			this.sprite.setVelocityX(-moveSpeed);
 			this.sprite.setFlipX(true); // Flip sprite to face left
-		} else if (this.cursors?.right.isDown || this.wasd?.right.isDown) {
+		} else if (rightDown) {
 			this.sprite.setVelocityX(moveSpeed);
 			this.sprite.setFlipX(false); // Face right
 		} else {
@@ -133,7 +143,7 @@ export class Player {
 
 		// Jumping (with ability-based max jumps)
 		const maxJumps = this.abilityManager.getMaxJumps();
-		if (
+		const jumpPressed =
 			Phaser.Input.Keyboard.JustDown(
 				this.cursors?.up as Phaser.Input.Keyboard.Key,
 			) ||
@@ -142,8 +152,9 @@ export class Player {
 			) ||
 			Phaser.Input.Keyboard.JustDown(
 				this.cursors?.space as Phaser.Input.Keyboard.Key,
-			)
-		) {
+			) ||
+			touch?.jumpJustDown;
+		if (jumpPressed) {
 			if (this.jumpCount < maxJumps) {
 				this.sprite.setVelocityY(this.JUMP_VELOCITY);
 				this.jumpCount++;
@@ -151,10 +162,10 @@ export class Player {
 		}
 
 		// Shoot arrow (E key)
-		if (
-			this.abilityManager.abilities.canShootArrows &&
-			Phaser.Input.Keyboard.JustDown(this.eKey as Phaser.Input.Keyboard.Key)
-		) {
+		const shootPressed =
+			Phaser.Input.Keyboard.JustDown(this.eKey as Phaser.Input.Keyboard.Key) ||
+			touch?.shootJustDown;
+		if (this.abilityManager.abilities.canShootArrows && shootPressed) {
 			const now = Date.now();
 			if (now - this.lastArrowTime > this.ARROW_COOLDOWN) {
 				this.shootArrow();
@@ -173,10 +184,13 @@ export class Player {
 		body: Phaser.Physics.Arcade.Body,
 		canMoveLeft: boolean,
 	) {
+		const touch = this.touchControls?.getInput();
 		const movingHorizontally =
 			this.cursors?.right.isDown ||
 			this.wasd?.right.isDown ||
-			((this.cursors?.left.isDown || this.wasd?.left.isDown) && canMoveLeft);
+			touch?.right ||
+			((this.cursors?.left.isDown || this.wasd?.left.isDown || touch?.left) &&
+				canMoveLeft);
 
 		if (!body.touching.down) {
 			this.sprite.anims.play('player-flap', true);

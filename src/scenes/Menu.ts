@@ -20,6 +20,7 @@ export class Menu extends Scene {
 	selectedSize = 80;
 	arrowOffset = 0;
 	menuLeft = 0;
+	menuBoxWidth = 0;
 
 	constructor() {
 		super('Menu');
@@ -62,6 +63,20 @@ export class Menu extends Scene {
 			this.menuLeft +
 			(this.arrow.displayWidth ?? this.arrow.width) +
 			arrowPadding;
+
+		const measure = this.add
+			.text(0, 0, '', {
+				fontFamily: 'Pixelify Sans',
+				fontSize: `${this.selectedSize}px`,
+			})
+			.setVisible(false);
+		this.menuBoxWidth = Math.max(
+			...this.navigation.map((item) => {
+				measure.setText(item.key);
+				return measure.width;
+			}),
+		);
+		measure.destroy();
 
 		this.navigation.forEach((item, i) => {
 			const menuText = this.add
@@ -128,33 +143,30 @@ export class Menu extends Scene {
 	updateMenuBackdrop() {
 		if (!this.menuBackdrop) return;
 
-		let minX = Number.POSITIVE_INFINITY;
 		let minY = Number.POSITIVE_INFINITY;
-		let maxX = Number.NEGATIVE_INFINITY;
 		let maxY = Number.NEGATIVE_INFINITY;
 
 		this.menu.forEach((t) => {
 			const b = t.getBounds();
-			minX = Math.min(minX, b.left);
 			minY = Math.min(minY, b.top);
-			maxX = Math.max(maxX, b.right);
 			maxY = Math.max(maxY, b.bottom);
 		});
 
 		if (this.arrow) {
 			const ab = this.arrow.getBounds();
-			minX = Math.min(minX, ab.left);
 			minY = Math.min(minY, ab.top);
-			maxX = Math.max(maxX, ab.right);
 			maxY = Math.max(maxY, ab.bottom);
 		}
 
 		const paddingX = Math.max(24, Math.floor(this.selectedSize * 0.6));
 		const paddingY = Math.max(12, Math.floor(this.selectedSize * 0.35));
 
-		const rectX = Math.max(8, minX - paddingX);
+		const arrowWidth = this.arrow?.displayWidth ?? 0;
+		const contentWidth =
+			arrowWidth + 16 + this.menuBoxWidth + paddingX * 2;
+		const rectX = Math.max(8, this.menuLeft - paddingX);
 		const rectY = Math.max(8, minY - paddingY);
-		const rectW = Math.min(WIDTH - 16, maxX - minX + paddingX * 2);
+		const rectW = Math.min(WIDTH - 16, contentWidth);
 		const rectH = Math.min(HEIGHT - 16, maxY - minY + paddingY * 2);
 
 		this.menuBackdrop.clear();
@@ -175,7 +187,11 @@ export class Menu extends Scene {
 
 		if (scene) {
 			this.sound.play('success', { volume: 0.6 });
-			this.scene.switch(scene);
+			if (scene === 'Play') {
+				this.scene.start('Play');
+			} else {
+				this.scene.switch(scene);
+			}
 		}
 	}
 }
