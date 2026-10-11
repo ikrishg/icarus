@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -12,6 +13,7 @@ permissions:
 jobs:
   changelog:
     name: Changelog
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
 
     outputs:
@@ -107,7 +109,9 @@ jobs:
   deploy:
     name: Deploy
     needs: [changelog]
-    if: needs.changelog.outputs.skipped == 'false'
+    if: >-
+      always() && (github.event_name == 'workflow_dispatch' ||
+      (needs.changelog.result == 'success' && needs.changelog.outputs.skipped == 'false'))
     runs-on: ubuntu-latest
 
     environment:
