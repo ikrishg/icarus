@@ -15,6 +15,8 @@ export class LevelManager {
 	platforms: Phaser.Physics.Arcade.StaticGroup;
 	hazards: GameObjects.Group;
 	portal: Phaser.GameObjects.Container;
+	/** Physics body used for level completion (not the decorative glow). */
+	portalTrigger: Phaser.Physics.Arcade.Sprite | null = null;
 	fireballs: Fireball[] = [];
 	fireballTimers: Phaser.Time.TimerEvent[] = [];
 	lavaTimers: Phaser.Time.TimerEvent[] = [];
@@ -52,6 +54,7 @@ export class LevelManager {
 	}
 
 	renderCurrent() {
+		this.portalTrigger = null;
 		this.visuals.clear(true, true);
 		this.hazards.clear(true, true);
 		this.platforms.clear(true, true);
@@ -332,12 +335,15 @@ export class LevelManager {
 		const portalSprite = this.scene.physics.add.sprite(0, 0, 'portal');
 		portalSprite.setScale(portalScale);
 		portalSprite.setOrigin(0.5, 1);
+		portalSprite.setData('portalTrigger', true);
 
 		const body = portalSprite.body as Phaser.Physics.Arcade.Body;
 		body.setSize(30, 44);
 		body.setOffset(1, 0);
 		body.setAllowGravity(false);
 		body.setImmovable(true);
+
+		this.portalTrigger = portalSprite;
 
 		this.portal.add(glow);
 		this.portal.add(portalSprite);

@@ -10,6 +10,7 @@ import {
 	DEPTH_PLAY_HUD_TEXT,
 	PLAY_HUD_CLEARANCE_Y,
 } from '../util/constants';
+import { isDebugPlayEnabled } from '../util/debug';
 import { sanitizePixelFont } from '../util/text';
 
 const ABILITY_CARD_FILL = 0xd6c9b6;
@@ -157,7 +158,7 @@ export class Play extends Scene {
 		};
 		this.input.keyboard?.on('keydown-ESC', this.escKeyHandler);
 
-		if (import.meta.env.DEV) {
+		if (isDebugPlayEnabled()) {
 			this.skipKeyHandler = () => {
 				if (!this.isResetting) {
 					this.completeLevel();
@@ -379,28 +380,21 @@ export class Play extends Scene {
 			}
 		}
 
-		if (this.levelManager.portal) {
-			const portalChildren =
-				this.levelManager.portal.getAll() as Phaser.Physics.Arcade.Sprite[];
-			const portalSprite = portalChildren.find(
-				(child) => child.texture?.key === 'portal',
+		const portalTrigger = this.levelManager.portalTrigger;
+		if (portalTrigger?.body) {
+			this.colliders.push(
+				this.physics.add.overlap(
+					this.player.sprite,
+					portalTrigger,
+					() => {
+						if (!this.player.isDead && !this.isResetting) {
+							this.completeLevel();
+						}
+					},
+					undefined,
+					this,
+				),
 			);
-
-			if (portalSprite) {
-				this.colliders.push(
-					this.physics.add.overlap(
-						this.player.sprite,
-						portalSprite,
-						() => {
-							if (!this.player.isDead && !this.isResetting) {
-								this.completeLevel();
-							}
-						},
-						undefined,
-						this,
-					),
-				);
-			}
 		}
 	}
 
@@ -589,7 +583,13 @@ export class Play extends Scene {
 
 			// Add ability name
 			this.add
-				.text(x, y + 60, this.abilityManager.getAbilityDescription(data.key), {
+				.text(
+					x,
+					y + 60,
+					sanitizePixelFont(
+						this.abilityManager.getAbilityDescription(data.key),
+					),
+					{
 					fontFamily: 'Pixelify Sans',
 					fontSize: '28px',
 					color: ABILITY_CARD_INK_HEX,
@@ -601,7 +601,7 @@ export class Play extends Scene {
 
 			// Add effect description
 			this.add
-				.text(x, y + 110, data.effect, {
+				.text(x, y + 110, sanitizePixelFont(data.effect), {
 					fontFamily: 'Pixelify Sans',
 					fontSize: '20px',
 					color: ABILITY_LOSS_EFFECT_HEX,
