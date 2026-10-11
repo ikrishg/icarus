@@ -1,8 +1,19 @@
-/** Break common ligatures (e.g. Pixelify Sans "fl" → wrong glyph) for canvas text. */
+const breakLigature = (pair: string, text: string): string => {
+	const re = new RegExp(pair, 'gi');
+	return text.replace(re, (match) => {
+		const first = match[0];
+		const second = match[1];
+		const upper = first === first.toUpperCase();
+		return `${upper ? first.toUpperCase() : first}\u200C${upper ? second.toUpperCase() : second}`;
+	});
+};
+
+/** Break common Pixelify Sans ligatures (e.g. "fl"/"fi" → wrong "A" glyph). */
 export function sanitizePixelFont(text: string): string {
-	return text.replace(/fl/gi, (match) =>
-		match[0] === 'F' ? 'F\u200Cl' : 'f\u200Cl',
-	);
+	let out = text;
+	out = breakLigature('fl', out);
+	out = breakLigature('fi', out);
+	return out;
 }
 
 export const PIXEL_FONT_FAMILY = 'Pixelify Sans';

@@ -1,6 +1,7 @@
 import { type GameObjects, Scene } from 'phaser';
 import { BackgroundManager } from '../components/Background';
 import { HEIGHT, WIDTH } from '../util/constants';
+import { sanitizePixelFont } from '../util/text';
 
 export class Dead extends Scene {
 	backgroundManager: BackgroundManager;
@@ -57,7 +58,9 @@ export class Dead extends Scene {
 			.text(
 				WIDTH / 2,
 				bodyY,
-				`The sun has claimed another victim.\n\nYou flew too close, and the wax melted.\n\nBut legends are made through perseverance...`,
+				sanitizePixelFont(
+					`The sun has claimed another victim.\n\nYou flew too close, and the wax melted.\n\nBut legends are made through perseverance...`,
+				),
 				{
 					font: `${bodyFontSize}px Pixelify Sans`,
 					color: '#ffcccc',
