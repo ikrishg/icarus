@@ -20,6 +20,7 @@ export class LevelManager {
 	fireballs: Fireball[] = [];
 	fireballTimers: Phaser.Time.TimerEvent[] = [];
 	lavaTimers: Phaser.Time.TimerEvent[] = [];
+	private hudObjects: Phaser.GameObjects.GameObject[] = [];
 
 	constructor(scene: Scene, levels: LevelDefinition[] = LEVELS) {
 		this.scene = scene;
@@ -93,6 +94,7 @@ export class LevelManager {
 			.setDepth(DEPTH_PLAY_HUD_TEXT);
 
 		this.visuals.add(title);
+		this.hudObjects = [title];
 
 		const titleBg = this.scene.add
 			.rectangle(
@@ -107,24 +109,28 @@ export class LevelManager {
 			.setDepth(DEPTH_PLAY_HUD_BAR);
 
 		this.visuals.add(titleBg);
+		this.hudObjects.push(titleBg);
 
-		// Add restart shortcut indicator in top right
-		const restartHint = this.scene.add
-			.text(
-				this.scene.cameras.main.width - 20,
-				50,
-				'SHIFT + R to restart level',
-				{
-				fontFamily: 'Pixelify Sans',
-				fontSize: '40px',
-				color: '#ffffff',
-				stroke: '#1b1b1c',
-				strokeThickness: 2,
-			})
-			.setOrigin(1, 0.5)
-			.setDepth(DEPTH_PLAY_HUD_TEXT);
+		if (this.scene.scale.width > 480) {
+			const restartHint = this.scene.add
+				.text(
+					this.scene.cameras.main.width - 20,
+					50,
+					'Shift+R restart',
+					{
+						fontFamily: 'Pixelify Sans',
+						fontSize: '40px',
+						color: '#ffffff',
+						stroke: '#0b1a2e',
+						strokeThickness: 2,
+					},
+				)
+				.setOrigin(1, 0.5)
+				.setDepth(DEPTH_PLAY_HUD_TEXT);
 
-		this.visuals.add(restartHint);
+			this.visuals.add(restartHint);
+			this.hudObjects.push(restartHint);
+		}
 
 		const groundY = this.scene.cameras.main.height - 40;
 		const groundWidth = this.scene.cameras.main.width;
@@ -317,6 +323,12 @@ export class LevelManager {
 		body.updateFromGameObject();
 		this.platforms.add(collider);
 		this.visuals.add(collider);
+	}
+
+	setHudVisible(visible: boolean): void {
+		for (const obj of this.hudObjects) {
+			obj.setVisible(visible);
+		}
 	}
 
 	createPortal(x: number, y: number) {
