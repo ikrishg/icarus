@@ -1,4 +1,5 @@
 import type { PlayerAbilities } from './types';
+import { JUMP_LEVEL_FLOOR, maxJumpsForJumpLevel } from './jumpReach';
 
 export type AbilityKey = keyof PlayerAbilities;
 
@@ -25,25 +26,16 @@ export function abilityStateLine(
 	switch (key) {
 		case 'jumpLevel': {
 			const j = abilities.jumpLevel;
-			const wingbeats = (level: number) => {
-				switch (level) {
-					case 3:
-						return 4;
-					case 2:
-						return 2;
-					case 1:
-						return 1;
-					default:
-						return 0;
-				}
-			};
-			const current = wingbeats(j);
-			const after = wingbeats(Math.max(0, j - 1));
-			if (current === 0) return 'Feathers: no wingbeats';
-			const label =
-				current === 1 ? '1 wingbeat' : `${current} wingbeats`;
-			if (after === 0) return `Feathers: ${label} → none`;
-			const afterLabel = after === 1 ? '1' : String(after);
+			const beats = maxJumpsForJumpLevel(j);
+			const label = beats === 1 ? '1 wingbeat' : `${beats} wingbeats`;
+			if (j <= JUMP_LEVEL_FLOOR) {
+				return `Feathers: ${label} (minimum)`;
+			}
+			const afterBeats = maxJumpsForJumpLevel(
+				Math.max(JUMP_LEVEL_FLOOR, j - 1),
+			);
+			const afterLabel =
+				afterBeats === 1 ? '1 wingbeat' : `${afterBeats} wingbeats`;
 			return `Feathers: ${label} → ${afterLabel}`;
 		}
 		case 'visionLevel': {
