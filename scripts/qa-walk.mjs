@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium, devices } from 'playwright';
+import { loadJumpReachCheck } from './import-jump-reach.mjs';
 import { loadSanitizePixelFont } from './import-sanitize.mjs';
 import { startStaticServer } from './static-server.mjs';
 
@@ -511,6 +512,9 @@ async function runMobile(baseUrl) {
 async function main() {
 	const sanitizePixelFont = await loadSanitizePixelFont();
 	const ligature = checkSanitizePixelFont(sanitizePixelFont);
+	const openingRoutes = await loadJumpReachCheck();
+	const allOpeningRoutesOk = openingRoutes.every((row) => row.ok);
+	const daedalusRoute = openingRoutes.find((row) => row.name === 'Daedalus Interlude');
 	const { server, baseUrl } = await startStaticServer();
 	const pause = await runPauseEscToggle(baseUrl);
 	const desktop = await runDesktop(baseUrl);
@@ -540,11 +544,26 @@ async function main() {
 		mobile.touchButtonCount === 1 &&
 		mobile.touchMoveWorked &&
 		mobile.touchJumpWorked &&
-		ligature.flightOk;
+		ligature.flightOk &&
+		allOpeningRoutesOk;
 
 	console.log(
 		JSON.stringify(
-			{ ligature, pause, desktop, debug, lives, about, mobile, pass },
+			{
+				ligature,
+				openingRoutes: {
+					allOpeningRoutesOk,
+					daedalusRise: daedalusRoute?.rise ?? null,
+					levels: openingRoutes,
+				},
+				pause,
+				desktop,
+				debug,
+				lives,
+				about,
+				mobile,
+				pass,
+			},
 			null,
 			2,
 		),

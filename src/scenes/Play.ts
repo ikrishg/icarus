@@ -704,7 +704,6 @@ export class Play extends Scene {
 			if (
 				data.key === 'jumpLevel' &&
 				typeof currentValue === 'number' &&
-				this.levelManager.currentIndex === 1 &&
 				currentValue <= 2
 			) {
 				return false;
@@ -842,7 +841,11 @@ export class Play extends Scene {
 
 			// Downgrade the ability
 			if (typeof currentValue === 'number') {
-				this.abilityManager.abilities[abilityKey] = (currentValue - 1) as never;
+				let next = currentValue - 1;
+				if (abilityKey === 'jumpLevel') {
+					next = Math.max(2, next);
+				}
+				this.abilityManager.abilities[abilityKey] = next as never;
 			} else {
 				this.abilityManager.abilities[abilityKey] = false as never;
 			}

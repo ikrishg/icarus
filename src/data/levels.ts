@@ -42,7 +42,7 @@ export const LEVELS: LevelDefinition[] = [
 		goal: { x: 1720, y: 280 },
 		obstacles: [
 			ground,
-			{ type: 'platform', x: 500, y: 820, w: 320, h: 40 },
+			{ type: 'platform', x: 500, y: 800, w: 320, h: 40 },
 			{
 				type: 'movingEnemy',
 				x: 820,
