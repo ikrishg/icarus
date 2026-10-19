@@ -14,8 +14,9 @@ import {
 	abilityStateLine,
 	regainLevelTitle,
 } from '../util/abilityCopy';
-import { PALETTE_HEX } from '../util/palette';
+import { PALETTE, PALETTE_HEX } from '../util/palette';
 import { touchFontSizeStyle } from '../util/responsiveText';
+import { touchChromeMetrics } from '../util/touchLayout';
 import { sanitizePixelFont } from '../util/text';
 
 const ABILITY_CARD_FILL = 0xd6c9b6;
@@ -1298,7 +1299,7 @@ export class Play extends Scene {
 					const depth = (
 						child as Phaser.GameObjects.GameObject & { depth: number }
 					).depth;
-					return depth === 21 || depth === 22 || depth === 23;
+					return depth >= 21 && depth <= 24;
 				})
 				.forEach((child) => {
 					child.destroy();
@@ -1318,7 +1319,7 @@ export class Play extends Scene {
 			startY +
 			Math.ceil(upgradeableAbilities.length / cols) * (boxSize + spacing) +
 			16;
-		this.add
+		const helperTextObj = this.add
 			.text(
 				this.cameras.main.width / 2,
 				helperY,
@@ -1334,25 +1335,38 @@ export class Play extends Scene {
 			.setOrigin(0.5)
 			.setDepth(21);
 
-		let doneButton: Phaser.GameObjects.Text | undefined;
+		let doneButtonBg: Phaser.GameObjects.Rectangle | undefined;
+		let doneButtonLabel: Phaser.GameObjects.Text | undefined;
 		const showDoneButton = () => {
-			if (doneButton?.active) return;
-			doneButton = this.add
-				.text(this.cameras.main.width / 2, helperY + 52, 'Done', {
-					fontFamily: 'Pixelify Sans',
-					fontSize: touchFontSizeStyle(this, 40),
-					color: PALETTE_HEX.cloudWhite,
-					backgroundColor: PALETTE_HEX.deep,
-					padding: { x: 24, y: 12 },
-				})
-				.setOrigin(0.5)
-				.setDepth(23)
-				.setInteractive({ useHandCursor: true });
-			doneButton.on('pointerdown', () => {
+			if (doneButtonBg?.active) return;
+			const helperBottom = helperTextObj.y + helperTextObj.displayHeight / 2;
+			const chrome = touchChromeMetrics(this);
+			const doneH = chrome.chromeH;
+			const doneW = Math.max(chrome.chromeW, 160);
+			const doneY = helperBottom + 28 + doneH / 2;
+			const cx = this.cameras.main.width / 2;
+			const onDone = () => {
 				if (selectedAbilities >= 1) {
 					finishGain();
 				}
-			});
+			};
+			doneButtonBg = this.add
+				.rectangle(cx, doneY, doneW, doneH, PALETTE.deep, 0.95)
+				.setStrokeStyle(2, PALETTE.cloudWhite, 0.35)
+				.setDepth(23)
+				.setInteractive({ useHandCursor: true });
+			doneButtonLabel = this.add
+				.text(cx, doneY, 'Done', {
+					fontFamily: 'Pixelify Sans',
+					fontSize: touchFontSizeStyle(this, 40),
+					color: PALETTE_HEX.cloudWhite,
+					align: 'center',
+				})
+				.setOrigin(0.5)
+				.setDepth(24);
+			doneButtonBg.on('pointerdown', onDone);
+			doneButtonLabel.setInteractive({ useHandCursor: true });
+			doneButtonLabel.on('pointerdown', onDone);
 		};
 
 		const keyHandler = (event: KeyboardEvent) => {

@@ -690,6 +690,153 @@ async function runPortraitGameplayPause(baseUrl) {
 	return { portraitPauseOk, portraitBoot, afterRotate };
 }
 
+function rectsOverlap(a, b) {
+	return (
+		a.left < b.right &&
+		a.right > b.left &&
+		a.top < b.bottom &&
+		a.bottom > b.top
+	);
+}
+
+async function runTouchTitleChromeClearance(baseUrl) {
+	const viewports = [
+		{ width: 640, height: 360 },
+		{ width: 844, height: 390 },
+	];
+	const failures = [];
+	const browser = await chromium.launch();
+	for (const vp of viewports) {
+		const page = await browser.newPage({
+			viewport: vp,
+			isMobile: true,
+			hasTouch: true,
+		});
+		await bootToPlay(page, baseUrl);
+		for (let level = 0; level < 15; level++) {
+			const result = await page.evaluate((idx) => {
+				const play = window.__icarusGame?.scene.getScene('Play');
+				if (!play?.touchControls?.visible) return { ok: true };
+				play.levelManager.goto(idx);
+				play.resetPlayer();
+				if (play.pausePanel) play.closePause();
+				play.setGameplayHudVisible(true);
+				play.showLevelInstruction();
+				const title = play.levelManager.getHudTitle?.();
+				if (!title?.getBounds) return { ok: false, reason: 'no-title' };
+				const tb = title.getBounds();
+				const titleRect = {
+					left: tb.left,
+					right: tb.right,
+					top: tb.top,
+					bottom: tb.bottom,
+				};
+				const chrome = play.touchControls.getChromeBounds?.() ?? [];
+				const overlap = chrome.some((c) => {
+					return (
+						titleRect.left < c.right &&
+						titleRect.right > c.left &&
+						titleRect.top < c.bottom &&
+						titleRect.bottom > c.top
+					);
+				});
+				return { ok: !overlap, titleRect, chrome };
+			}, level);
+			if (!result.ok) {
+				failures.push({ viewport: vp, level: level + 1, ...result });
+			}
+		}
+		await page.close();
+	}
+	await browser.close();
+	return { touchTitleChromeOk: failures.length === 0, failures };
+}
+
+async function runGainDoneLayout(baseUrl) {
+	const browser = await chromium.launch();
+	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+	await bootToPlay(page, baseUrl);
+	await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		play.abilityManager.abilities.jumpLevel = 1;
+		play.abilityManager.abilities.dashLevel = 1;
+		play.isResetting = true;
+		play.showAbilityGainScreen();
+	});
+	await page.waitForTimeout(500);
+	await page.locator('canvas').click();
+	await page.keyboard.press('Enter');
+	await page.waitForTimeout(350);
+	const layout = await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const helper = play.children.list.find(
+			(c) => c.type === 'Text' && c.depth === 21,
+		);
+		const doneBg = play.children.list.find(
+			(c) => c.type === 'Rectangle' && c.depth === 23,
+		);
+		if (!helper?.getBounds || !doneBg?.getBounds) {
+			return { gainDoneLayoutOk: false, reason: 'missing-nodes' };
+		}
+		const hb = helper.getBounds();
+		const db = doneBg.getBounds();
+		const overlap =
+			hb.bottom > db.top + 1 &&
+			hb.top < db.bottom &&
+			hb.left < db.right &&
+			hb.right > db.left;
+		return {
+			gainDoneLayoutOk: !overlap,
+			helperBottom: hb.bottom,
+			doneTop: db.top,
+		};
+	});
+	await browser.close();
+	return layout;
+}
+
+async function runTouchPauseToggle(baseUrl) {
+	const browser = await chromium.launch();
+	const page = await browser.newPage({
+		viewport: { width: 844, height: 390 },
+		isMobile: true,
+		hasTouch: true,
+	});
+	await bootToPlay(page, baseUrl);
+	const pausePoint = await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const bounds = play?.touchControls?.getChromeBounds?.();
+		const pause = bounds?.[0];
+		const game = window.__icarusGame;
+		if (!pause || !game?.canvas) return null;
+		const sm = game.scale;
+		const rect = game.canvas.getBoundingClientRect();
+		const scale = sm.displaySize.width / sm.width;
+		const offsetX = rect.left + (rect.width - sm.displaySize.width) / 2;
+		const offsetY = rect.top + (rect.height - sm.displaySize.height) / 2;
+		return {
+			x: offsetX + ((pause.left + pause.right) / 2) * scale,
+			y: offsetY + ((pause.top + pause.bottom) / 2) * scale,
+		};
+	});
+	if (!pausePoint) {
+		await browser.close();
+		return { touchPauseToggleOk: false };
+	}
+	await page.mouse.click(pausePoint.x, pausePoint.y);
+	await page.waitForTimeout(400);
+	const opened = await page.evaluate(() =>
+		Boolean(window.__icarusGame?.scene.getScene('Play')?.pausePanel),
+	);
+	await page.mouse.click(pausePoint.x, pausePoint.y);
+	await page.waitForTimeout(400);
+	const closed = await page.evaluate(() =>
+		!window.__icarusGame?.scene.getScene('Play')?.pausePanel,
+	);
+	await browser.close();
+	return { touchPauseToggleOk: opened && closed, opened, closed };
+}
+
 async function runLandscapeMinText(baseUrl) {
 	const browser = await chromium.launch();
 	const page = await browser.newPage({
@@ -746,11 +893,30 @@ async function runLandscapeMinText(baseUrl) {
 				return depth >= 20 && depth <= 23;
 			})
 			.forEach((c) => c.destroy());
+		play.abilityManager.abilities.jumpLevel = 1;
+		play.abilityManager.abilities.dashLevel = 1;
 		play.isResetting = true;
 		play.showAbilityGainScreen();
 	});
 	await page.waitForTimeout(400);
 	const regain = await measureInPage();
+	await page.locator('canvas').click();
+	await page.keyboard.press('Enter');
+	await page.waitForTimeout(350);
+	const touchDoneSize = await page.evaluate(() => {
+		const game = window.__icarusGame;
+		const play = game?.scene.getScene('Play');
+		const doneBg = play?.children?.list?.find(
+			(c) => c.type === 'Rectangle' && c.depth === 23,
+		);
+		if (!doneBg?.getBounds || !game) {
+			return { cssHeight: 0, ok: false };
+		}
+		const scale = game.scale.displaySize.width / game.scale.width;
+		const b = doneBg.getBounds();
+		const cssHeight = b.height * scale;
+		return { cssHeight, ok: cssHeight >= 44 };
+	});
 	await page.evaluate(() => {
 		const play = window.__icarusGame?.scene.getScene('Play');
 		play.children.list
@@ -777,6 +943,8 @@ async function runLandscapeMinText(baseUrl) {
 		pause,
 		smallestScreenPx: smallest,
 		landscapeMinTextOk: smallest >= 12,
+		touchDoneMinHeightOk: touchDoneSize.ok === true,
+		touchDoneCssHeight: touchDoneSize.cssHeight,
 	};
 }
 
@@ -940,6 +1108,9 @@ async function main() {
 	const canvasResize = await runCanvasOrientationResize(baseUrl);
 	const portraitPause = await runPortraitGameplayPause(baseUrl);
 	const landscapeText = await runLandscapeMinText(baseUrl);
+	const gainDoneLayout = await runGainDoneLayout(baseUrl);
+	const touchTitleChrome = await runTouchTitleChromeClearance(baseUrl);
+	const touchPauseToggle = await runTouchPauseToggle(baseUrl);
 	const lossScreen = await runLossScreenLayout(baseUrl);
 	const mobile = await runMobile(baseUrl);
 	server.close();
@@ -965,6 +1136,10 @@ async function main() {
 		mobile.touchMoveWorked &&
 		mobile.touchJumpWorked &&
 		landscapeText.landscapeMinTextOk &&
+		landscapeText.touchDoneMinHeightOk &&
+		gainDoneLayout.gainDoneLayoutOk &&
+		touchTitleChrome.touchTitleChromeOk &&
+		touchPauseToggle.touchPauseToggleOk &&
 		portraitPause.portraitPauseOk &&
 		ligature.flightOk &&
 		allOpeningRoutesOk &&
@@ -992,6 +1167,9 @@ async function main() {
 				canvasResize,
 				portraitPause,
 				landscapeText,
+				gainDoneLayout,
+				touchTitleChrome,
+				touchPauseToggle,
 				lossScreen,
 				mobile,
 				pass,

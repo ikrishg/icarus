@@ -1,7 +1,9 @@
 import type { GameObjects, Scene } from 'phaser';
 import { LEVELS } from '../data/levels';
 import { isTouchDevice } from './TouchControls';
-import { DEPTH_PLAY_HUD_BAR, DEPTH_PLAY_HUD_TEXT } from '../util/constants';
+import { DEPTH_PLAY_HUD_BAR, DEPTH_PLAY_HUD_TEXT, WIDTH } from '../util/constants';
+import { touchFontSizeStyle } from '../util/responsiveText';
+import { touchChromeMetrics } from '../util/touchLayout';
 import type { LevelDefinition, ObstacleDef, Point } from '../util/types';
 import { Fireball } from './Fireball';
 
@@ -22,6 +24,11 @@ export class LevelManager {
 	fireballTimers: Phaser.Time.TimerEvent[] = [];
 	lavaTimers: Phaser.Time.TimerEvent[] = [];
 	private hudObjects: Phaser.GameObjects.GameObject[] = [];
+
+	getHudTitle(): Phaser.GameObjects.Text | undefined {
+		const obj = this.hudObjects[0];
+		return obj instanceof Phaser.GameObjects.Text ? obj : undefined;
+	}
 
 	constructor(scene: Scene, levels: LevelDefinition[] = LEVELS) {
 		this.scene = scene;
@@ -78,17 +85,24 @@ export class LevelManager {
 
 		const level = this.current;
 
+		const touch = isTouchDevice(this.scene);
+		const chrome = touch ? touchChromeMetrics(this.scene) : null;
+		const titleWrap = touch
+			? WIDTH - chrome!.margin * 2 - chrome!.rightReserve
+			: this.scene.cameras.main.width - 80;
 		const title = this.scene.add
 			.text(
-				this.scene.cameras.main.width / 2,
+				touch ? chrome!.margin + titleWrap / 2 : this.scene.cameras.main.width / 2,
 				50,
 				`Level ${this.currentIndex + 1}: ${level.name}`,
 				{
 					fontFamily: 'Pixelify Sans',
-					fontSize: '80px',
+					fontSize: touch ? touchFontSizeStyle(this.scene, 52) : '80px',
 					color: '#ffffff',
 					stroke: '#1b1b1c',
 					strokeThickness: 4,
+					align: 'center',
+					wordWrap: touch ? { width: titleWrap } : undefined,
 				},
 			)
 			.setOrigin(0.5, 0.5)
