@@ -54,7 +54,7 @@ export class About extends Scene {
 				sanitizePixelFont(
 					`Icarus flies toward the sun on wings of feathers and wax.
 Every few levels the heat takes something. You choose what to give up: feathers, sight, speed, the way home, or your father's bow.
-Five times, the sky gives a little back. Spend it well. Reach the sun.
+Four times, the sky gives a little back. Spend it well. Reach the sun.
 Arrows or WASD to move. Up, W or Space to jump. Q to dash. E to shoot. Shift+R restarts the level.`,
 				),
 				{

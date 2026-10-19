@@ -12,6 +12,8 @@ const CAUSE_LINES: Record<DeathCause, string> = {
 	enemy: 'The fire took you.',
 };
 
+const JUMP_KEY_CODES = new Set(['Space', 'ArrowUp', 'KeyW']);
+
 export type DeathSequenceOptions = {
 	fast: boolean;
 	onRebuild: () => void;
@@ -26,7 +28,9 @@ export class DeathSequence {
 	private splash?: Phaser.GameObjects.Image;
 	private particles?: Phaser.GameObjects.Particles.ParticleEmitterManager;
 	private jumpBuffer = false;
-	private escBlocked = true;
+	private escBlocked = false;
+	private jumpKeyHandler?: (event: KeyboardEvent) => void;
+	private active = false;
 
 	constructor(scene: Scene, player: Player) {
 		this.scene = scene;
@@ -38,6 +42,10 @@ export class DeathSequence {
 		const totalMs = fast ? 700 : 1600;
 		const sprite = this.player.sprite;
 		const body = sprite.body as Phaser.Physics.Arcade.Body;
+
+		this.active = true;
+		this.escBlocked = true;
+		this.jumpBuffer = false;
 
 		body.enable = false;
 		this.player.isDead = true;
@@ -75,13 +83,13 @@ export class DeathSequence {
 
 		if (!fast) {
 			this.scene.time.delayedCall(90, () => {
-				if (this.scene.textures.exists('icarus-melt')) {
+				if (this.scene.anims.exists('icarus-melt')) {
 					sprite.play('icarus-melt');
 				}
 				this.spawnParticles();
 			});
 			this.scene.time.delayedCall(510, () => {
-				if (this.scene.textures.exists('icarus-fall')) {
+				if (this.scene.anims.exists('icarus-fall')) {
 					sprite.play('icarus-fall');
 				}
 				sprite.setVelocity(0, -180);
@@ -96,7 +104,7 @@ export class DeathSequence {
 			});
 		} else {
 			this.scene.time.delayedCall(90, () => {
-				if (this.scene.textures.exists('icarus-fall')) {
+				if (this.scene.anims.exists('icarus-fall')) {
 					sprite.play('icarus-fall');
 				}
 				sprite.setVelocity(0, -120);
@@ -189,17 +197,21 @@ export class DeathSequence {
 		});
 
 		this.scene.time.delayedCall(fadeInAt, () => {
-			if (this.scene.textures.exists('icarus-rise')) {
+			if (this.scene.anims.exists('icarus-rise')) {
 				sprite.play('icarus-rise');
 			}
-		});
-
-		this.scene.time.delayedCall(fast ? 550 : 1450, () => {
-			this.jumpBuffer = true;
+			this.jumpKeyHandler = (event: KeyboardEvent) => {
+				if (JUMP_KEY_CODES.has(event.code)) {
+					this.jumpBuffer = true;
+				}
+			};
+			this.scene.input.keyboard?.on('keydown', this.jumpKeyHandler);
 		});
 
 		this.scene.time.delayedCall(totalMs, () => {
+			this.clearJumpListener();
 			this.escBlocked = false;
+			this.active = false;
 			sprite.clearTint();
 			sprite.play('player-idle');
 			sprite.setRotation(0);
@@ -223,7 +235,14 @@ export class DeathSequence {
 	}
 
 	isEscBlocked(): boolean {
-		return this.escBlocked;
+		return this.active && this.escBlocked;
+	}
+
+	private clearJumpListener(): void {
+		if (this.jumpKeyHandler) {
+			this.scene.input.keyboard?.off('keydown', this.jumpKeyHandler);
+			this.jumpKeyHandler = undefined;
+		}
 	}
 
 	private spawnParticles(): void {
