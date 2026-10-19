@@ -212,7 +212,9 @@ export class TouchControls {
 	setGameplayVisible(visible: boolean) {
 		if (!this.visible) return;
 		for (const node of this.nodes) {
-			node.setVisible(visible);
+			if ('setVisible' in node && typeof node.setVisible === 'function') {
+				node.setVisible(visible);
+			}
 		}
 	}
 

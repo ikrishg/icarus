@@ -26,7 +26,7 @@ export class DeathSequence {
 	private overlay?: Phaser.GameObjects.Rectangle;
 	private causeText?: Phaser.GameObjects.Text;
 	private splash?: Phaser.GameObjects.Image;
-	private particles?: Phaser.GameObjects.Particles.ParticleEmitterManager;
+	private particles?: Phaser.GameObjects.Particles.ParticleEmitter;
 	private jumpBuffer = false;
 	private escBlocked = false;
 	private jumpKeyHandler?: (event: KeyboardEvent) => void;
