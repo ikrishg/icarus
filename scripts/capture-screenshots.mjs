@@ -92,33 +92,84 @@ async function waitPlayReady(page) {
 	);
 }
 
+async function getAbilityModalKind(page) {
+	return page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const texts =
+			play?.children.list.filter(
+				(c) =>
+					c.type === 'Text' &&
+					c.depth === 21 &&
+					typeof c.text === 'string',
+			) ?? [];
+		const joined = texts.map((t) => t.text).join(' ');
+		if (joined.includes('sun takes')) return 'loss';
+		if (
+			joined.includes('take back') ||
+			joined.includes('mends') ||
+			joined.includes('returns') ||
+			joined.includes('Daedalus') ||
+			joined.includes('cloud') ||
+			joined.includes('Sea Wind') ||
+			joined.includes('sun looks')
+		) {
+			return 'regain';
+		}
+		if (joined.includes('Choose')) return 'loss';
+		return null;
+	});
+}
+
+async function regainPickCount(page) {
+	return page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const texts =
+			play?.children.list.filter(
+				(c) =>
+					c.type === 'Text' &&
+					(c.depth === 21 || c.depth === 22) &&
+					typeof c.text === 'string',
+			) ?? [];
+		for (const t of texts) {
+			const m = t.text.match(/Choose (\d+) to take back/);
+			if (m) return Number.parseInt(m[1], 10);
+		}
+		if (texts.some((t) => t.text.includes('Choose 1 to take back'))) return 1;
+		return 3;
+	});
+}
+
 async function dismissModals(page, startIndex) {
-	for (let i = 0; i < 16; i++) {
+	for (let i = 0; i < 24; i++) {
 		const idx = await getLevelIndex(page);
 		if (idx > startIndex) return true;
 		const won = await page.evaluate(() =>
 			window.__icarusGame?.scene.isActive('Win'),
 		);
 		if (won) return true;
-		const hasModal = await page.evaluate(() => {
-			const play = window.__icarusGame?.scene.getScene('Play');
-			return play?.children.list.some(
-				(c) =>
-					c.type === 'Text' &&
-					c.depth === 21 &&
-					typeof c.text === 'string' &&
-					(c.text.includes('Choose') ||
-						c.text.includes('sun takes') ||
-						c.text.includes('take back') ||
-						c.text.includes('mends')),
-			);
-		});
-		if (!hasModal) {
+
+		const kind = await getAbilityModalKind(page);
+		if (!kind) {
 			await page.waitForTimeout(400);
 			continue;
 		}
-		await page.keyboard.press('Enter');
-		await page.waitForTimeout(500);
+
+		if (kind === 'loss') {
+			await page.keyboard.press('Enter');
+			await page.waitForTimeout(600);
+			continue;
+		}
+
+		const picks = await regainPickCount(page);
+		for (let p = 0; p < picks; p++) {
+			if ((await getAbilityModalKind(page)) !== 'regain') break;
+			await page.keyboard.press('Enter');
+			await page.waitForTimeout(700);
+		}
+		if ((await getAbilityModalKind(page)) === 'regain') {
+			await page.keyboard.press('Shift+Enter');
+			await page.waitForTimeout(900);
+		}
 	}
 	return (await getLevelIndex(page)) > startIndex;
 }

@@ -330,7 +330,9 @@ export class LevelManager {
 
 	setHudVisible(visible: boolean): void {
 		for (const obj of this.hudObjects) {
-			obj.setVisible(visible);
+			if ('setVisible' in obj && typeof obj.setVisible === 'function') {
+				obj.setVisible(visible);
+			}
 		}
 	}
 

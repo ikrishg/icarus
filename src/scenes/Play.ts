@@ -5,11 +5,7 @@ import { LevelManager } from '../components/LevelManager';
 import { Player } from '../components/Player';
 import { TouchControls } from '../components/TouchControls';
 import type { PlayerAbilities } from '../util/types';
-import {
-	DEPTH_PLAY_HUD_BAR,
-	DEPTH_PLAY_HUD_TEXT,
-	PLAY_HUD_CLEARANCE_Y,
-} from '../util/constants';
+import { DEPTH_PLAY_HUD_TEXT, PLAY_HUD_CLEARANCE_Y } from '../util/constants';
 import { DeathSequence, type DeathCause } from '../components/DeathSequence';
 import { isDebugPlayEnabled } from '../util/debug';
 import {
