@@ -25,10 +25,26 @@ export function abilityStateLine(
 	switch (key) {
 		case 'jumpLevel': {
 			const j = abilities.jumpLevel;
-			if (j >= 3) return 'Feathers: 4 wingbeats';
-			if (j === 2) return 'Feathers: 4 wingbeats to 2';
-			if (j === 1) return 'Feathers: 2 wingbeats to 1';
-			return 'Feathers: no wingbeats';
+			const wingbeats = (level: number) => {
+				switch (level) {
+					case 3:
+						return 4;
+					case 2:
+						return 2;
+					case 1:
+						return 1;
+					default:
+						return 0;
+				}
+			};
+			const current = wingbeats(j);
+			const after = wingbeats(Math.max(0, j - 1));
+			if (current === 0) return 'Feathers: no wingbeats';
+			const label =
+				current === 1 ? '1 wingbeat' : `${current} wingbeats`;
+			if (after === 0) return `Feathers: ${label} → none`;
+			const afterLabel = after === 1 ? '1' : String(after);
+			return `Feathers: ${label} → ${afterLabel}`;
 		}
 		case 'visionLevel': {
 			const v = abilities.visionLevel;

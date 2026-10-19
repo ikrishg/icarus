@@ -90,7 +90,7 @@ export class Preloader extends Scene {
 		this.load.once('filecomplete-image-wordmark', () => {
 			if (this.textures.exists('wordmark') && !this.wordmarkImage) {
 				this.wordmarkImage = this.add
-					.image(WIDTH / 2, HEIGHT / 2 - 160, 'wordmark')
+					.image(WIDTH / 2, HEIGHT / 2 - 300, 'wordmark')
 					.setDepth(1)
 					.setAlpha(0.9);
 			}
