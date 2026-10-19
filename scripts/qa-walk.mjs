@@ -697,6 +697,33 @@ async function runMobile(baseUrl) {
 			portalMobileLevel2 && (await getLevelIndex(page)) === startIndex + 1;
 	}
 
+	const landscapeText = await page.evaluate(() => {
+		const game = window.__icarusGame;
+		const play = game?.scene.getScene('Play');
+		if (!game || !play) return { smallestScreenPx: 0, scale: 0 };
+		const scale = Math.min(
+			game.scale.displaySize.width / 1920,
+			game.scale.displaySize.height / 1080,
+		);
+		let smallest = Infinity;
+		const measure = (obj) => {
+			if (!obj?.active) return;
+			const raw = obj.style?.fontSize ?? obj.fontSize;
+			const gamePx =
+				typeof raw === 'number' ? raw : parseFloat(String(raw || '0'));
+			if (gamePx > 0) smallest = Math.min(smallest, gamePx * scale);
+		};
+		for (const child of play.children?.list ?? []) {
+			if (child.type === 'Text') measure(child);
+		}
+		measure(play.instructionText);
+		measure(play.livesText);
+		return {
+			smallestScreenPx: smallest === Infinity ? 0 : smallest,
+			scale,
+		};
+	});
+
 	await browser.close();
 	return {
 		widthRatio,
@@ -704,6 +731,8 @@ async function runMobile(baseUrl) {
 		touchMoveWorked,
 		touchJumpWorked,
 		portalMobileLevel2,
+		landscapeText,
+		landscapeMinTextOk: landscapeText.smallestScreenPx >= 12,
 		canvasInPlay,
 		viewport,
 	};
@@ -748,6 +777,7 @@ async function main() {
 		mobile.touchButtonCount === 1 &&
 		mobile.touchMoveWorked &&
 		mobile.touchJumpWorked &&
+		mobile.landscapeMinTextOk &&
 		ligature.flightOk &&
 		allOpeningRoutesOk &&
 		groundDash.groundDashOk &&

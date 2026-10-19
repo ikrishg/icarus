@@ -48,6 +48,7 @@ export class DeathSequence {
 		this.jumpBuffer = false;
 
 		body.enable = false;
+		const startedOnGround = body.touching.down;
 		this.player.isDead = true;
 		sprite.clearTint();
 		sprite.stop();
@@ -92,13 +93,15 @@ export class DeathSequence {
 				if (this.scene.anims.exists('icarus-fall')) {
 					sprite.play('icarus-fall');
 				}
-				const fallStartY = sprite.y;
-				this.scene.tweens.add({
-					targets: sprite,
-					y: fallStartY + 115,
-					duration: 390,
-					ease: 'Sine.easeIn',
-				});
+				if (!startedOnGround) {
+					const fallStartY = sprite.y;
+					this.scene.tweens.add({
+						targets: sprite,
+						y: fallStartY + 115,
+						duration: 390,
+						ease: 'Sine.easeIn',
+					});
+				}
 				this.scene.tweens.add({
 					targets: sprite,
 					angle: 20,

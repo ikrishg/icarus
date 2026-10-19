@@ -15,6 +15,7 @@ import {
 	regainLevelTitle,
 } from '../util/abilityCopy';
 import { PALETTE_HEX } from '../util/palette';
+import { touchFontSizeStyle } from '../util/responsiveText';
 import { sanitizePixelFont } from '../util/text';
 
 const ABILITY_CARD_FILL = 0xd6c9b6;
@@ -577,6 +578,7 @@ export class Play extends Scene {
 		}
 		if (this.deathSequence?.isEscBlocked()) return;
 		if (this.isResetting) return;
+		if (this.player?.isDead) return;
 		this.togglePause();
 	}
 
@@ -683,12 +685,12 @@ export class Play extends Scene {
 				0x0b1a2e,
 				0.75,
 			)
-			.setDepth(14);
+			.setDepth(30);
 
 		this.instructionText = this.add
 			.text(this.cameras.main.width / 2, panelY, instruction, {
 				fontFamily: 'Pixelify Sans',
-				fontSize: '48px',
+				fontSize: touchFontSizeStyle(this, 48),
 				color: '#fdfdfe',
 				stroke: PALETTE_HEX.deep,
 				strokeThickness: 2,
@@ -700,7 +702,7 @@ export class Play extends Scene {
 				},
 			})
 			.setOrigin(0.5)
-			.setDepth(15);
+			.setDepth(31);
 
 		// Fade out instruction message
 		this.tweens.add({
@@ -842,7 +844,7 @@ export class Play extends Scene {
 			const mythText = this.add
 				.text(0, 0, sanitizePixelFont(myth), {
 					fontFamily: 'Pixelify Sans',
-					fontSize: '36px',
+					fontSize: touchFontSizeStyle(this, 36),
 					color: ABILITY_CARD_INK_HEX,
 					align: 'center',
 					wordWrap: { width: textW },
@@ -851,7 +853,7 @@ export class Play extends Scene {
 			const stateText = this.add
 				.text(0, 0, stateLine, {
 					fontFamily: 'Pixelify Sans',
-					fontSize: '30px',
+					fontSize: touchFontSizeStyle(this, 30),
 					color: ABILITY_CARD_INK_HEX,
 					align: 'center',
 					wordWrap: { width: textW },
@@ -860,7 +862,7 @@ export class Play extends Scene {
 			const lossText = this.add
 				.text(0, 0, lossLine, {
 					fontFamily: 'Pixelify Sans',
-					fontSize: '30px',
+					fontSize: touchFontSizeStyle(this, 30),
 					color: ABILITY_LOSS_EFFECT_HEX,
 					align: 'center',
 					wordWrap: { width: textW },
@@ -910,7 +912,7 @@ export class Play extends Scene {
 			this.add
 				.text(x, textY, sanitizePixelFont(myth), {
 					fontFamily: 'Pixelify Sans',
-					fontSize: '36px',
+					fontSize: touchFontSizeStyle(this, 36),
 					color: ABILITY_CARD_INK_HEX,
 					align: 'center',
 					wordWrap: { width: textW },
@@ -921,7 +923,7 @@ export class Play extends Scene {
 			const stateRendered = this.add
 				.text(x, textY, stateLine, {
 					fontFamily: 'Pixelify Sans',
-					fontSize: '30px',
+					fontSize: touchFontSizeStyle(this, 30),
 					color: ABILITY_CARD_INK_HEX,
 					align: 'center',
 					wordWrap: { width: textW },
@@ -932,7 +934,7 @@ export class Play extends Scene {
 			this.add
 				.text(x, textY, lossLine, {
 					fontFamily: 'Pixelify Sans',
-					fontSize: '30px',
+					fontSize: touchFontSizeStyle(this, 30),
 					color: ABILITY_LOSS_EFFECT_HEX,
 					align: 'center',
 					wordWrap: { width: textW },
@@ -950,7 +952,7 @@ export class Play extends Scene {
 				),
 				{
 					fontFamily: 'Pixelify Sans',
-					fontSize: '32px',
+					fontSize: touchFontSizeStyle(this, 32),
 					color: PALETTE_HEX.cardHelper,
 					align: 'center',
 					wordWrap: { width: this.cameras.main.width - 120 },
@@ -1183,7 +1185,7 @@ export class Play extends Scene {
 					),
 					{
 						fontFamily: 'Pixelify Sans',
-						fontSize: '28px',
+						fontSize: touchFontSizeStyle(this, 28),
 						color: ABILITY_CARD_INK_HEX,
 						align: 'center',
 						wordWrap: { width: boxSize - 20 },
@@ -1200,6 +1202,16 @@ export class Play extends Scene {
 				styleAbilityCard(btn, i === selectedIndex);
 			});
 		};
+
+		const gainPickLine =
+			maxSelections === 1
+				? 'Choose 1 to take back.'
+				: `Choose up to ${maxSelections} to take back.`;
+		let gainHelperText = `${gainPickLine} Tap a card, or use the arrows and Enter.`;
+		if (!isTouchDevice(this)) {
+			gainHelperText +=
+				' Shift+Enter when done. D also finishes after your first pick.';
+		}
 
 		let gainFinished = false;
 		let gainCompleteTimer: Phaser.Time.TimerEvent | undefined;
@@ -1283,12 +1295,10 @@ export class Play extends Scene {
 			.text(
 				this.cameras.main.width / 2,
 				helperY,
-				sanitizePixelFont(
-					'Choose up to 2. Tap a card, or use the arrows and Enter.',
-				),
+				sanitizePixelFont(gainHelperText),
 				{
 					fontFamily: 'Pixelify Sans',
-					fontSize: '32px',
+					fontSize: touchFontSizeStyle(this, 32),
 					color: PALETTE_HEX.cardHelper,
 					align: 'center',
 					wordWrap: { width: this.cameras.main.width - 120 },
@@ -1303,7 +1313,7 @@ export class Play extends Scene {
 			doneButton = this.add
 				.text(this.cameras.main.width / 2, helperY + 52, 'Done', {
 					fontFamily: 'Pixelify Sans',
-					fontSize: '40px',
+					fontSize: touchFontSizeStyle(this, 40),
 					color: PALETTE_HEX.cloudWhite,
 					backgroundColor: PALETTE_HEX.deep,
 					padding: { x: 24, y: 12 },
@@ -1322,6 +1332,13 @@ export class Play extends Scene {
 			if (event.code === 'ArrowLeft' || event.code === 'KeyA') {
 				selectedIndex = Math.max(0, selectedIndex - 1);
 				updateSelection();
+			} else if (
+				doneButton?.active &&
+				event.code === 'KeyD' &&
+				!event.shiftKey &&
+				selectedAbilities >= 1
+			) {
+				finishGain();
 			} else if (event.code === 'ArrowRight' || event.code === 'KeyD') {
 				selectedIndex = Math.min(buttons.length - 1, selectedIndex + 1);
 				updateSelection();

@@ -1,6 +1,10 @@
 import type { Scene } from 'phaser';
 import { HEIGHT, WIDTH } from '../util/constants';
-import { PALETTE_HEX } from '../util/palette';
+import { PALETTE, PALETTE_HEX } from '../util/palette';
+import {
+	gameFontForMinScreenPx,
+	MIN_TOUCH_SCREEN_TEXT_PX,
+} from '../util/responsiveText';
 
 export type TouchInputState = {
 	left: boolean;
@@ -135,28 +139,41 @@ export class TouchControls {
 	}
 
 	private makeChromeButton(
-		x: number,
-		y: number,
+		centerX: number,
+		centerY: number,
+		width: number,
+		height: number,
 		label: string,
 		onTap: () => void,
 	): void {
-		const text = this.scene.add
-			.text(x, y, label, {
-				fontFamily: 'Pixelify Sans',
-				fontSize: '32px',
-				color: PALETTE_HEX.cloudWhite,
-				backgroundColor: PALETTE_HEX.deep,
-				padding: { x: 14, y: 8 },
-			})
-			.setOrigin(1, 0)
+		const bg = this.scene.add
+			.rectangle(centerX, centerY, width, height, PALETTE.deep, 0.92)
+			.setStrokeStyle(2, PALETTE.cloudWhite, 0.35)
 			.setScrollFactor(0)
-			.setDepth(202)
+			.setDepth(201)
 			.setInteractive({ useHandCursor: true });
-		text.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+		const fontPx = Math.max(
+			28,
+			gameFontForMinScreenPx(this.scene, MIN_TOUCH_SCREEN_TEXT_PX),
+		);
+		const text = this.scene.add
+			.text(centerX, centerY, label, {
+				fontFamily: 'Pixelify Sans',
+				fontSize: `${fontPx}px`,
+				color: PALETTE_HEX.cloudWhite,
+				align: 'center',
+			})
+			.setOrigin(0.5)
+			.setScrollFactor(0)
+			.setDepth(202);
+		const tap = (pointer: Phaser.Input.Pointer) => {
 			pointer.event?.preventDefault();
 			onTap();
-		});
-		this.chromeNodes.push(text);
+		};
+		bg.on('pointerdown', tap);
+		text.setInteractive({ useHandCursor: true });
+		text.on('pointerdown', tap);
+		this.chromeNodes.push(bg, text);
 	}
 
 	private build() {
@@ -234,11 +251,20 @@ export class TouchControls {
 			},
 		);
 
-		const topY = 50;
-		this.makeChromeButton(WIDTH - margin, topY, 'Pause', () => {
+		const displayScale = Math.max(
+			this.scene.scale.displaySize.width / WIDTH,
+			this.scene.scale.displaySize.height / HEIGHT,
+		);
+		const chromeH = Math.max(48, Math.ceil(44 / displayScale));
+		const chromeW = Math.max(120, Math.ceil(100 / displayScale));
+		const chromeGap = Math.max(12, Math.ceil(8 / displayScale));
+		const chromeY = margin + chromeH / 2;
+		const restartX = WIDTH - margin - chromeW / 2;
+		const pauseX = restartX - chromeW - chromeGap;
+		this.makeChromeButton(pauseX, chromeY, chromeW, chromeH, 'Pause', () => {
 			this.onPause?.();
 		});
-		this.makeChromeButton(WIDTH - margin, topY + 48, 'Restart', () => {
+		this.makeChromeButton(restartX, chromeY, chromeW, chromeH, 'Restart', () => {
 			this.onRestart?.();
 		});
 	}
