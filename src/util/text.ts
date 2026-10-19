@@ -3,8 +3,7 @@ const breakLigature = (pair: string, text: string): string => {
 	return text.replace(re, (match) => {
 		const first = match[0];
 		const second = match[1];
-		const upper = first === first.toUpperCase();
-		return `${upper ? first.toUpperCase() : first}\u200C${upper ? second.toUpperCase() : second}`;
+		return `${first}\u200C${second}`;
 	});
 };
 
