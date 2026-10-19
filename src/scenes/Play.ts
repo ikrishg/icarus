@@ -98,6 +98,9 @@ export class Play extends Scene {
 	visionOverlay: Phaser.GameObjects.Rectangle;
 	touchControls: TouchControls;
 	instructionText?: Phaser.GameObjects.Text;
+	instructionPanel?: Phaser.GameObjects.Rectangle;
+	private pauseResumeKey?: Phaser.Input.Keyboard.Key;
+	private pauseQuitKey?: Phaser.Input.Keyboard.Key;
 	lives = 3;
 	giftsLost = 0;
 	livesText?: Phaser.GameObjects.Text;
@@ -342,11 +345,15 @@ export class Play extends Scene {
 		);
 		this.setupLevelColliders();
 		this.showLevelInstruction();
-		this.isResetting = false;
 		this.playBattleMusic();
 	}
 
 	clearLevelInstruction() {
+		if (this.instructionPanel?.active) {
+			this.tweens.killTweensOf(this.instructionPanel);
+			this.instructionPanel.destroy();
+			this.instructionPanel = undefined;
+		}
 		if (this.instructionText?.active) {
 			this.tweens.killTweensOf(this.instructionText);
 			this.instructionText.destroy();
@@ -566,12 +573,15 @@ export class Play extends Scene {
 			)
 			.setOrigin(0.5);
 		this.pausePanel.add([bg, title, hint]);
-		const resume = this.input.keyboard?.addKey(
+		this.pauseResumeKey = this.input.keyboard?.addKey(
 			Phaser.Input.Keyboard.KeyCodes.ESC,
 		);
-		const quit = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
-		resume?.once('down', () => this.closePause());
-		quit?.once('down', () => {
+		this.pauseQuitKey = this.input.keyboard?.addKey(
+			Phaser.Input.Keyboard.KeyCodes.Q,
+		);
+		this.pauseResumeKey?.once('down', () => this.closePause());
+		this.pauseQuitKey?.once('down', () => {
+			if (!this.isPaused) return;
 			this.closePause();
 			this.sound.stopAll();
 			this.scene.start('Menu');
@@ -579,6 +589,10 @@ export class Play extends Scene {
 	}
 
 	closePause() {
+		this.pauseResumeKey?.removeAllListeners();
+		this.pauseQuitKey?.removeAllListeners();
+		this.pauseResumeKey = undefined;
+		this.pauseQuitKey = undefined;
 		this.pausePanel?.destroy();
 		this.pausePanel = undefined;
 		this.isPaused = false;
@@ -593,7 +607,7 @@ export class Play extends Scene {
 		);
 
 		const panelY = PLAY_HUD_CLEARANCE_Y + 72;
-		const panel = this.add
+		this.instructionPanel = this.add
 			.rectangle(
 				this.cameras.main.width / 2,
 				panelY,
@@ -623,12 +637,13 @@ export class Play extends Scene {
 
 		// Fade out instruction message
 		this.tweens.add({
-			targets: [panel, this.instructionText],
+			targets: [this.instructionPanel, this.instructionText],
 			alpha: 0,
 			duration: 1500,
 			delay: 2000,
 			onComplete: () => {
-				panel.destroy();
+				this.instructionPanel?.destroy();
+				this.instructionPanel = undefined;
 				this.instructionText?.destroy();
 				this.instructionText = undefined;
 			},
@@ -688,6 +703,14 @@ export class Play extends Scene {
 		const cols = 3;
 		const downgradeable = abilityData.filter((data) => {
 			const currentValue = this.abilityManager.abilities[data.key];
+			if (
+				data.key === 'jumpLevel' &&
+				typeof currentValue === 'number' &&
+				this.levelManager.currentIndex === 1 &&
+				currentValue <= 2
+			) {
+				return false;
+			}
 			if (typeof currentValue === 'number' && currentValue > 0) return true;
 			if (typeof currentValue === 'boolean' && currentValue) return true;
 			return false;
@@ -1038,6 +1061,9 @@ export class Play extends Scene {
 			});
 		};
 
+		let gainFinished = false;
+		let gainCompleteTimer: Phaser.Time.TimerEvent | undefined;
+
 		// Function to select current ability
 		const selectAbility = () => {
 			const button = buttons[selectedIndex];
@@ -1069,11 +1095,16 @@ export class Play extends Scene {
 				.setDepth(23);
 
 			if (selectedAbilities >= maxSelections) {
-				this.time.delayedCall(600, () => finishGain());
+				gainCompleteTimer?.remove();
+				gainCompleteTimer = this.time.delayedCall(600, () => finishGain());
 			}
 		};
 
 		const finishGain = () => {
+			if (gainFinished) return;
+			gainFinished = true;
+			gainCompleteTimer?.remove();
+			gainCompleteTimer = undefined;
 			this.player.controlsEnabled = true;
 			this.touchControls?.setGameplayVisible(true);
 			this.levelManager.setHudVisible(true);

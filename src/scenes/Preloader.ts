@@ -7,6 +7,8 @@ import {
 } from '../util/generateDeathAssets';
 
 export class Preloader extends Scene {
+	private wordmarkImage?: Phaser.GameObjects.Image;
+
 	constructor() {
 		super('Preloader');
 	}
@@ -20,8 +22,6 @@ export class Preloader extends Scene {
 
 		// Background color
 		this.cameras.main.setBackgroundColor('#1b1b1c');
-
-		this.load.image('wordmark', 'assets/wordmark.webp');
 
 		const loadingText = this.add
 			.text(WIDTH / 2, barY - 120, 'LOADING...', {
@@ -87,6 +87,14 @@ export class Preloader extends Scene {
 		// Load all game assets
 		this.load.image('background', 'assets/sky.webp');
 		this.load.image('wordmark', 'assets/wordmark.webp');
+		this.load.once('filecomplete-image-wordmark', () => {
+			if (this.textures.exists('wordmark') && !this.wordmarkImage) {
+				this.wordmarkImage = this.add
+					.image(WIDTH / 2, HEIGHT / 2 - 160, 'wordmark')
+					.setDepth(1)
+					.setAlpha(0.9);
+			}
+		});
 		this.load.spritesheet('cloud', 'assets/cloud.webp', {
 			frameWidth: 48,
 			frameHeight: 20,
@@ -139,13 +147,6 @@ export class Preloader extends Scene {
 	}
 
 	create() {
-		if (this.textures.exists('wordmark')) {
-			this.add
-				.image(WIDTH / 2, HEIGHT / 2 - 160, 'wordmark')
-				.setDepth(1)
-				.setAlpha(0.9);
-		}
-
 		registerDeathPlaceholderTextures(this);
 		registerDeathAnimations(this);
 

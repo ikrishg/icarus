@@ -111,7 +111,10 @@ export class LevelManager {
 		this.visuals.add(titleBg);
 		this.hudObjects.push(titleBg);
 
-		if (this.scene.scale.width > 480) {
+		const displayWidth =
+			this.scene.scale.displaySize?.width ??
+			(typeof window !== 'undefined' ? window.innerWidth : this.scene.scale.width);
+		if (displayWidth > 480) {
 			const restartHint = this.scene.add
 				.text(
 					this.scene.cameras.main.width - 20,

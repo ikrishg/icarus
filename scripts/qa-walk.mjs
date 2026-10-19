@@ -5,6 +5,23 @@ import { startStaticServer } from './static-server.mjs';
 
 const ARTIFACT_SCREENSHOTS = '/opt/cursor/artifacts/screenshots';
 
+/** Mirror src/util/text.ts — catches FLight uppercasing regressions without a TS runner. */
+function checkFlightLigatureSanitize() {
+	const breakLigature = (pair, text) => {
+		const re = new RegExp(pair, 'gi');
+		return text.replace(re, (match) => `${match[0]}\u200C${match[1]}`);
+	};
+	const sanitizePixelFont = (text) => {
+		let out = text;
+		for (const pair of ['fl', 'fi', 'ff']) out = breakLigature(pair, out);
+		return out;
+	};
+	const flight = sanitizePixelFont('Flight');
+	const flightOk =
+		flight === 'F\u200Clight' && !flight.includes('FLight');
+	return { flight, flightOk };
+}
+
 async function bootToPlay(page, baseUrl, search = '') {
 	const url = search ? `${baseUrl}${search.startsWith('?') ? search : `?${search}`}` : baseUrl;
 	await page.goto(url);
@@ -467,6 +484,7 @@ async function runMobile(baseUrl) {
 }
 
 async function main() {
+	const ligature = checkFlightLigatureSanitize();
 	const { server, baseUrl } = await startStaticServer();
 	const desktop = await runDesktop(baseUrl);
 	const debug = await runDebugCheat(baseUrl);
@@ -493,10 +511,11 @@ async function main() {
 		mobile.widthRatio > 0.85 &&
 		mobile.touchButtonCount === 1 &&
 		mobile.touchMoveWorked &&
-		mobile.touchJumpWorked;
+		mobile.touchJumpWorked &&
+		ligature.flightOk;
 
 	console.log(
-		JSON.stringify({ desktop, debug, lives, about, mobile, pass }, null, 2),
+		JSON.stringify({ ligature, desktop, debug, lives, about, mobile, pass }, null, 2),
 	);
 	process.exit(pass ? 0 : 1);
 }
