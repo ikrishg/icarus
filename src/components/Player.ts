@@ -124,10 +124,12 @@ export class Player {
 		const moveSpeed = this.abilityManager.getMoveSpeed();
 		const canMoveLeft = this.abilityManager.abilities.canMoveLeft;
 
+		const minCenter = body.halfWidth;
+		const maxCenter = WIDTH - body.halfWidth;
+
 		if (this.isDashing) {
 			this.sprite.setVelocityX(this.DASH_SPEED * this.dashDirection);
 			this.updatePlayerAnimation(body, canMoveLeft);
-			this.clampHorizontalWorldBounds(body);
 			return; // Skip normal movement during dash
 		}
 
@@ -136,15 +138,21 @@ export class Player {
 		const rightDown =
 			this.cursors?.right.isDown || this.wasd?.right.isDown || touch?.right;
 
-		// Horizontal movement
-		if (leftDown && canMoveLeft) {
+		// Horizontal movement (do not set velocity into a wall; poststep fixes true overshoot)
+		if (leftDown && canMoveLeft && body.center.x > minCenter) {
 			this.sprite.setVelocityX(-moveSpeed);
 			this.sprite.setFlipX(true); // Flip sprite to face left
-		} else if (rightDown) {
+		} else if (rightDown && body.center.x < maxCenter) {
 			this.sprite.setVelocityX(moveSpeed);
 			this.sprite.setFlipX(false); // Face right
 		} else {
 			this.sprite.setVelocityX(0);
+		}
+		if (body.center.x <= minCenter && body.velocity.x < 0) {
+			body.velocity.x = 0;
+		}
+		if (body.center.x >= maxCenter && body.velocity.x > 0) {
+			body.velocity.x = 0;
 		}
 
 		// Jumping (with ability-based max jumps)
@@ -184,31 +192,25 @@ export class Player {
 		// Slight rotation based on vertical velocity for better feel
 		const rotation = Phaser.Math.Clamp(body.velocity.y * 0.0003, -0.2, 0.2);
 		this.sprite.setRotation(rotation);
-		this.zeroVelocityIntoWalls(body);
 	}
 
-	zeroVelocityIntoWalls(body: Phaser.Physics.Arcade.Body): void {
-		const minCenter = body.halfWidth;
-		const maxCenter = WIDTH - body.halfWidth;
-		const centerX = body.center.x;
-		if (centerX <= minCenter + 0.5 && body.velocity.x < 0) {
-			body.velocity.x = 0;
-		}
-		if (centerX >= maxCenter - 0.5 && body.velocity.x > 0) {
-			body.velocity.x = 0;
-		}
-	}
-
+	/** Post-step only: correct when the body center is past the world edge (dash / knockback). */
 	clampHorizontalWorldBounds(body: Phaser.Physics.Arcade.Body): void {
 		const minCenter = body.halfWidth;
 		const maxCenter = WIDTH - body.halfWidth;
 		const centerX = body.center.x;
 		if (centerX < minCenter) {
-			body.velocity.x = 0;
+			if (body.velocity.x < 0) {
+				body.velocity.x = 0;
+			}
 			this.sprite.x += minCenter - centerX;
 			body.updateFromGameObject();
-		} else if (centerX > maxCenter) {
-			body.velocity.x = 0;
+			return;
+		}
+		if (centerX > maxCenter) {
+			if (body.velocity.x > 0) {
+				body.velocity.x = 0;
+			}
 			this.sprite.x += maxCenter - centerX;
 			body.updateFromGameObject();
 		}

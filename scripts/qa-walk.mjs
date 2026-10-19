@@ -613,13 +613,13 @@ async function runSideEdgeClamp(baseUrl) {
 		fallKills,
 		leftRange,
 		rightRange,
-		wallJitterOk: leftRange <= 2 && rightRange <= 2,
+		wallJitterOk: leftRange <= 1 && rightRange <= 1,
 		sideEdgeClampOk:
 			leftEdge.ok &&
 			rightEdge.ok &&
 			fallKills === true &&
-			leftRange <= 2 &&
-			rightRange <= 2,
+			leftRange <= 1 &&
+			rightRange <= 1,
 	};
 }
 
