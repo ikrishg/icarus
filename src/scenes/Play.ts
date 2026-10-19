@@ -99,7 +99,6 @@ export class Play extends Scene {
 	touchControls: TouchControls;
 	instructionText?: Phaser.GameObjects.Text;
 	instructionPanel?: Phaser.GameObjects.Rectangle;
-	private pauseResumeKey?: Phaser.Input.Keyboard.Key;
 	private pauseQuitKey?: Phaser.Input.Keyboard.Key;
 	lives = 3;
 	giftsLost = 0;
@@ -292,13 +291,13 @@ export class Play extends Scene {
 		const spendLife = options.spendLife !== false;
 
 		this.clearLevelInstruction();
-		this.levelManager.setHudVisible(false);
+		this.setGameplayHudVisible(false);
 		this.isResetting = true;
 		this.sound.play('death', { volume: 0.6 });
 
 		this.runEndedOnDeath = false;
 		const finishDeath = () => {
-			this.levelManager.setHudVisible(true);
+			this.setGameplayHudVisible(true);
 			this.isResetting = false;
 			if (this.runEndedOnDeath) {
 				this.scene.start('Dead');
@@ -535,6 +534,11 @@ export class Play extends Scene {
 		this.livesText?.setText(this.livesLabel());
 	}
 
+	setGameplayHudVisible(visible: boolean) {
+		this.levelManager.setHudVisible(visible);
+		this.livesText?.setVisible(visible);
+	}
+
 	togglePause() {
 		if (this.pausePanel) {
 			this.closePause();
@@ -573,13 +577,9 @@ export class Play extends Scene {
 			)
 			.setOrigin(0.5);
 		this.pausePanel.add([bg, title, hint]);
-		this.pauseResumeKey = this.input.keyboard?.addKey(
-			Phaser.Input.Keyboard.KeyCodes.ESC,
-		);
 		this.pauseQuitKey = this.input.keyboard?.addKey(
 			Phaser.Input.Keyboard.KeyCodes.Q,
 		);
-		this.pauseResumeKey?.once('down', () => this.closePause());
 		this.pauseQuitKey?.once('down', () => {
 			if (!this.isPaused) return;
 			this.closePause();
@@ -589,9 +589,7 @@ export class Play extends Scene {
 	}
 
 	closePause() {
-		this.pauseResumeKey?.removeAllListeners();
 		this.pauseQuitKey?.removeAllListeners();
-		this.pauseResumeKey = undefined;
 		this.pauseQuitKey = undefined;
 		this.pausePanel?.destroy();
 		this.pausePanel = undefined;
@@ -652,7 +650,7 @@ export class Play extends Scene {
 
 	showAbilityChoiceScreen() {
 		this.clearLevelInstruction();
-		this.levelManager.setHudVisible(false);
+		this.setGameplayHudVisible(false);
 		this.touchControls?.setGameplayVisible(false);
 		this.player.controlsEnabled = false;
 
@@ -719,7 +717,7 @@ export class Play extends Scene {
 		if (downgradeable.length === 0) {
 			this.player.controlsEnabled = true;
 			this.touchControls?.setGameplayVisible(true);
-			this.levelManager.setHudVisible(true);
+			this.setGameplayHudVisible(true);
 			const hasNext = this.levelManager.next();
 			if (!hasNext) {
 				this.showWinScreen();
@@ -852,7 +850,7 @@ export class Play extends Scene {
 
 			this.player.controlsEnabled = true;
 			this.touchControls?.setGameplayVisible(true);
-			this.levelManager.setHudVisible(true);
+			this.setGameplayHudVisible(true);
 
 			this.input.keyboard?.off('keydown', keyHandler);
 
@@ -903,13 +901,17 @@ export class Play extends Scene {
 		this.input.keyboard?.on('keydown', keyHandler);
 		updateSelection();
 
-		if (isDebugPlayEnabled() && buttons.length > 0) {
+		if (
+			isDebugPlayEnabled() &&
+			!window.__icarusHoldAbilityCards &&
+			buttons.length > 0
+		) {
 			this.time.delayedCall(80, () => selectAbility());
 		}
 	}
 	showAbilityGainScreen() {
 		this.clearLevelInstruction();
-		this.levelManager.setHudVisible(false);
+		this.setGameplayHudVisible(false);
 		this.touchControls?.setGameplayVisible(false);
 		this.player.controlsEnabled = false;
 
@@ -1107,7 +1109,7 @@ export class Play extends Scene {
 			gainCompleteTimer = undefined;
 			this.player.controlsEnabled = true;
 			this.touchControls?.setGameplayVisible(true);
-			this.levelManager.setHudVisible(true);
+			this.setGameplayHudVisible(true);
 			this.input.keyboard?.off('keydown', keyHandler);
 			bg.destroy();
 			title.destroy();
@@ -1199,7 +1201,11 @@ export class Play extends Scene {
 		this.input.keyboard?.on('keydown', keyHandler);
 		updateSelection();
 
-		if (isDebugPlayEnabled() && buttons.length > 0) {
+		if (
+			isDebugPlayEnabled() &&
+			!window.__icarusHoldAbilityCards &&
+			buttons.length > 0
+		) {
 			let autoPicks = 0;
 			const autoPick = () => {
 				if (autoPicks >= maxSelections) return;

@@ -1,25 +1,52 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium, devices } from 'playwright';
+import { loadSanitizePixelFont } from './import-sanitize.mjs';
 import { startStaticServer } from './static-server.mjs';
 
 const ARTIFACT_SCREENSHOTS = '/opt/cursor/artifacts/screenshots';
 
-/** Mirror src/util/text.ts — catches FLight uppercasing regressions without a TS runner. */
-function checkFlightLigatureSanitize() {
-	const breakLigature = (pair, text) => {
-		const re = new RegExp(pair, 'gi');
-		return text.replace(re, (match) => `${match[0]}\u200C${match[1]}`);
-	};
-	const sanitizePixelFont = (text) => {
-		let out = text;
-		for (const pair of ['fl', 'fi', 'ff']) out = breakLigature(pair, out);
-		return out;
-	};
+const ABOUT_BODY_RAW = `Icarus flies toward the sun on wings of feathers and wax.
+Every few levels the heat takes something. You choose what to give up: feathers, sight, speed, the way home, or your father's bow.
+Four times, the sky gives a little back. Spend it well. Reach the sun.
+Arrows or WASD to move. Up, W or Space to jump. Q to dash. E to shoot. Shift+R restarts the level.`;
+
+function checkSanitizePixelFont(sanitizePixelFont) {
 	const flight = sanitizePixelFont('Flight');
-	const flightOk =
-		flight === 'F\u200Clight' && !flight.includes('FLight');
-	return { flight, flightOk };
+	const expectedFlight = 'F\u200Clight';
+	const flightOk = flight === expectedFlight;
+	const expectedAbout = sanitizePixelFont(ABOUT_BODY_RAW);
+	return { flight, expectedFlight, flightOk, expectedAbout };
+}
+
+async function runPauseEscToggle(baseUrl) {
+	const browser = await chromium.launch();
+	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+	await bootToPlay(page, baseUrl);
+	for (let cycle = 0; cycle < 3; cycle++) {
+		await page.keyboard.press('Escape');
+		await page.waitForTimeout(350);
+		const open = await page.evaluate(() => {
+			const play = window.__icarusGame?.scene.getScene('Play');
+			return Boolean(play?.pausePanel);
+		});
+		if (!open) {
+			await browser.close();
+			return { pauseEscOk: false, failedAt: `open-${cycle}` };
+		}
+		await page.keyboard.press('Escape');
+		await page.waitForTimeout(350);
+		const closed = await page.evaluate(() => {
+			const play = window.__icarusGame?.scene.getScene('Play');
+			return !play?.pausePanel;
+		});
+		if (!closed) {
+			await browser.close();
+			return { pauseEscOk: false, failedAt: `close-${cycle}` };
+		}
+	}
+	await browser.close();
+	return { pauseEscOk: true };
 }
 
 async function bootToPlay(page, baseUrl, search = '') {
@@ -350,7 +377,7 @@ async function runLivesAndDeath(baseUrl) {
 	};
 }
 
-async function runAboutLigatures(baseUrl) {
+async function runAboutLigatures(baseUrl, expectedAbout) {
 	const browser = await chromium.launch();
 	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 	await bootToAbout(page, baseUrl);
@@ -367,10 +394,8 @@ async function runAboutLigatures(baseUrl) {
 		return '';
 	});
 	await browser.close();
-	const hasLigatureFix =
-		aboutText.includes('\u200C') ||
-		aboutText.toLowerCase().includes('father');
-	return { hasLigatureFix, aboutTextLength: aboutText.length };
+	const aboutExactOk = aboutText === expectedAbout;
+	return { aboutExactOk, aboutTextLength: aboutText.length };
 }
 
 async function runMobile(baseUrl) {
@@ -484,12 +509,14 @@ async function runMobile(baseUrl) {
 }
 
 async function main() {
-	const ligature = checkFlightLigatureSanitize();
+	const sanitizePixelFont = await loadSanitizePixelFont();
+	const ligature = checkSanitizePixelFont(sanitizePixelFont);
 	const { server, baseUrl } = await startStaticServer();
+	const pause = await runPauseEscToggle(baseUrl);
 	const desktop = await runDesktop(baseUrl);
 	const debug = await runDebugCheat(baseUrl);
 	const lives = await runLivesAndDeath(baseUrl);
-	const about = await runAboutLigatures(baseUrl);
+	const about = await runAboutLigatures(baseUrl, ligature.expectedAbout);
 	const mobile = await runMobile(baseUrl);
 	server.close();
 
@@ -505,7 +532,8 @@ async function main() {
 		lives.deadAfterThird &&
 		desktop.portalLevelsPassed &&
 		mobile.portalMobileLevel2 &&
-		about.hasLigatureFix &&
+		about.aboutExactOk &&
+		pause.pauseEscOk &&
 		!desktop.stuckOnGround &&
 		collidersStable &&
 		mobile.widthRatio > 0.85 &&
@@ -515,7 +543,11 @@ async function main() {
 		ligature.flightOk;
 
 	console.log(
-		JSON.stringify({ ligature, desktop, debug, lives, about, mobile, pass }, null, 2),
+		JSON.stringify(
+			{ ligature, pause, desktop, debug, lives, about, mobile, pass },
+			null,
+			2,
+		),
 	);
 	process.exit(pass ? 0 : 1);
 }

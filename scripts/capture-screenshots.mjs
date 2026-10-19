@@ -178,6 +178,9 @@ async function captureViewport(browser, baseUrl, vp) {
 	await shot(page, dir, 'credits');
 
 	await bootToScene(page, baseUrl, 'Play', debug);
+	await page.evaluate(() => {
+		window.__icarusHoldAbilityCards = true;
+	});
 	await waitPlayReady(page);
 
 	for (let level = 1; level <= 15; level++) {
