@@ -61,7 +61,6 @@ body {
 	}
 
 	#icarus-window {
-		visibility: hidden;
 		pointer-events: none;
 	}
 }

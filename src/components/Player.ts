@@ -188,12 +188,30 @@ export class Player {
 	}
 
 	clampHorizontalWorldBounds(body: Phaser.Physics.Arcade.Body): void {
-		const halfW = body.halfWidth;
-		const minX = halfW;
-		const maxX = WIDTH - halfW;
-		const clampedX = Phaser.Math.Clamp(this.sprite.x, minX, maxX);
-		if (this.sprite.x !== clampedX) {
-			this.sprite.x = clampedX;
+		const minCenter = body.halfWidth;
+		const maxCenter = WIDTH - body.halfWidth;
+		const centerX = body.center.x;
+		const clamped = Phaser.Math.Clamp(centerX, minCenter, maxCenter);
+		if (Math.abs(centerX - clamped) > 0.01) {
+			body.x = clamped;
+			body.velocity.x = 0;
+			body.updateFromGameObject();
+			return;
+		}
+		if (centerX <= minCenter + 0.5 && body.velocity.x < 0) {
+			body.velocity.x = 0;
+		}
+		if (centerX >= maxCenter - 0.5 && body.velocity.x > 0) {
+			body.velocity.x = 0;
+		}
+		const left = body.left;
+		const right = body.right;
+		if (left < 0) {
+			body.x += -left;
+			body.velocity.x = 0;
+			body.updateFromGameObject();
+		} else if (right > WIDTH) {
+			body.x -= right - WIDTH;
 			body.velocity.x = 0;
 			body.updateFromGameObject();
 		}

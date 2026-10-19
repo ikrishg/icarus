@@ -522,6 +522,82 @@ async function runSideEdgeClamp(baseUrl) {
 	};
 }
 
+async function runCanvasOrientationResize(baseUrl) {
+	const browser = await chromium.launch();
+	const page = await browser.newPage({
+		viewport: { width: 390, height: 844 },
+		isMobile: true,
+		hasTouch: true,
+	});
+	await page.goto(baseUrl);
+	await page.waitForFunction(() => window.__icarusGame?.scene != null);
+	await page.waitForTimeout(1500);
+	await page.setViewportSize({ width: 844, height: 390 });
+	await page.waitForTimeout(400);
+	const result = await page.evaluate(() => {
+		window.__icarusGame?.scale.refresh();
+		const canvas = document.querySelector('#icarus-window canvas');
+		const rect = canvas?.getBoundingClientRect();
+		const vw = window.innerWidth;
+		const ratio = rect && vw ? rect.width / vw : 0;
+		return {
+			canvasWidth: rect?.width ?? 0,
+			viewportWidth: vw,
+			ratio,
+		};
+	});
+	await page.waitForTimeout(300);
+	const after = await page.evaluate(() => {
+		const canvas = document.querySelector('#icarus-window canvas');
+		const rect = canvas?.getBoundingClientRect();
+		const vw = window.innerWidth;
+		const ratio = rect && vw ? rect.width / vw : 0;
+		return {
+			canvasWidth: rect?.width ?? 0,
+			viewportWidth: vw,
+			ratio,
+		};
+	});
+	await browser.close();
+	return {
+		...after,
+		canvasResizeOk: after.ratio >= 0.8,
+		immediateRatio: result.ratio,
+	};
+}
+
+async function runLossScreenLayout(baseUrl) {
+	const browser = await chromium.launch();
+	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+	await bootToPlay(page, baseUrl);
+	await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		play.isResetting = true;
+		play.showAbilityChoiceScreen();
+	});
+	await page.waitForTimeout(600);
+	const layout = await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const h = play.cameras.main.height;
+		const texts = play.children.list.filter(
+			(c) => c.type === 'Text' && c.depth >= 21 && c.depth <= 22,
+		);
+		const overflow = texts
+			.filter((t) => {
+				const b = t.getBounds();
+				return b.top < 0 || b.bottom > h;
+			})
+			.map((t) => ({
+				text: String(t.text).slice(0, 48),
+				top: t.getBounds().top,
+				bottom: t.getBounds().bottom,
+			}));
+		return { height: h, overflow, lossScreenOk: overflow.length === 0 };
+	});
+	await browser.close();
+	return layout;
+}
+
 async function runMobile(baseUrl) {
 	const browser = await chromium.launch();
 	const context = await browser.newContext({
@@ -647,6 +723,8 @@ async function main() {
 	const about = await runAboutLigatures(baseUrl, ligature.expectedAbout);
 	const groundDash = await runGroundDash(baseUrl);
 	const sideEdge = await runSideEdgeClamp(baseUrl);
+	const canvasResize = await runCanvasOrientationResize(baseUrl);
+	const lossScreen = await runLossScreenLayout(baseUrl);
 	const mobile = await runMobile(baseUrl);
 	server.close();
 
@@ -673,7 +751,9 @@ async function main() {
 		ligature.flightOk &&
 		allOpeningRoutesOk &&
 		groundDash.groundDashOk &&
-		sideEdge.sideEdgeClampOk;
+		sideEdge.sideEdgeClampOk &&
+		canvasResize.canvasResizeOk &&
+		lossScreen.lossScreenOk;
 
 	console.log(
 		JSON.stringify(
@@ -691,6 +771,8 @@ async function main() {
 				about,
 				groundDash,
 				sideEdge,
+				canvasResize,
+				lossScreen,
 				mobile,
 				pass,
 			},

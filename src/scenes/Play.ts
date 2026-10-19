@@ -3,7 +3,7 @@ import { AbilityManager } from '../components/AbilityManager';
 import { BackgroundManager } from '../components/Background';
 import { LevelManager } from '../components/LevelManager';
 import { Player } from '../components/Player';
-import { TouchControls } from '../components/TouchControls';
+import { isTouchDevice, TouchControls } from '../components/TouchControls';
 import type { PlayerAbilities } from '../util/types';
 import { DEPTH_PLAY_HUD_TEXT, PLAY_HUD_CLEARANCE_Y } from '../util/constants';
 import { DeathSequence, type DeathCause } from '../components/DeathSequence';
@@ -63,15 +63,20 @@ function abilityCardPosition(
 function addAbilityIcon(
 	scene: Scene,
 	x: number,
-	y: number,
+	cardTop: number,
+	cardHeight: number,
 	textureKey: string,
 ): Phaser.GameObjects.Image {
 	const frame = scene.textures.get(textureKey).get();
+	const iconArea = Math.min(ABILITY_ICON_MAX, Math.max(48, cardHeight * 0.2));
 	const scale = Math.min(
-		ABILITY_ICON_MAX / frame.width,
-		ABILITY_ICON_MAX / frame.height,
+		iconArea / frame.width,
+		iconArea / frame.height,
 	);
-	return scene.add.image(x, y - 40, textureKey).setScale(scale).setDepth(22);
+	const scaledH = frame.height * scale;
+	const padTop = 12;
+	const centerY = cardTop + padTop + scaledH / 2;
+	return scene.add.image(x, centerY, textureKey).setScale(scale).setDepth(22);
 }
 
 function styleAbilityCard(
@@ -144,7 +149,7 @@ export class Play extends Scene {
 		this.touchControls = new TouchControls(this);
 		this.player.touchControls = this.touchControls;
 		this.touchControls.setTopBarHandlers(
-			() => this.togglePause(),
+			() => this.requestPause(),
 			() => {
 				if (!this.isResetting && !this.isPaused) {
 					this.killPlayer('fall', { fast: true, spendLife: false });
@@ -152,10 +157,12 @@ export class Play extends Scene {
 			},
 		);
 		const spawn = this.levelManager.current.start;
-		const spawnMinX = this.touchControls.getLeftControlClearanceX();
+		const spawnMinX = this.touchControls.getMinSpawnX();
 		if (spawn.x < spawnMinX) {
 			this.player.setPosition(spawnMinX, spawn.y);
 		}
+
+		this.physics.world.on('poststep', this.clampPlayerToWorldSides, this);
 
 		// Create vision overlay
 		this.visionOverlay = this.add
@@ -185,9 +192,7 @@ export class Play extends Scene {
 		});
 
 		this.escKeyHandler = () => {
-			if (this.deathSequence?.isEscBlocked()) return;
-			if (this.isResetting) return;
-			this.togglePause();
+			this.requestPause();
 		};
 		this.input.keyboard?.on('keydown-ESC', this.escKeyHandler);
 
@@ -217,6 +222,7 @@ export class Play extends Scene {
 		this.resetRunState();
 		this.clearLevelInstruction();
 		this.clearColliders();
+		this.physics.world.off('poststep', this.clampPlayerToWorldSides, this);
 		this.touchControls?.destroy();
 		if (this.escKeyHandler) {
 			this.input.keyboard?.off('keydown-ESC', this.escKeyHandler);
@@ -241,10 +247,6 @@ export class Play extends Scene {
 			}
 		}
 		this.player.update();
-		const playerBody = this.player.sprite.body as Phaser.Physics.Arcade.Body;
-		if (playerBody && !this.player.isDead) {
-			this.player.clampHorizontalWorldBounds(playerBody);
-		}
 
 		// Update vision overlay
 		if (this.visionOverlay) {
@@ -356,7 +358,7 @@ export class Play extends Scene {
 		this.clearColliders();
 		this.levelManager.goto(levelIndex);
 		const startPos = this.levelManager.current.start;
-		const minX = this.touchControls?.getLeftControlClearanceX() ?? startPos.x;
+		const minX = this.touchControls?.getMinSpawnX() ?? startPos.x;
 		this.player.revive(
 			Math.max(startPos.x, minX),
 			startPos.y,
@@ -527,7 +529,7 @@ export class Play extends Scene {
 		this.clearLevelInstruction();
 		this.clearColliders();
 		const startPos = this.levelManager.current.start;
-		const minX = this.touchControls?.getLeftControlClearanceX() ?? startPos.x;
+		const minX = this.touchControls?.getMinSpawnX() ?? startPos.x;
 		this.player.revive(Math.max(startPos.x, minX), startPos.y);
 		this.setupLevelColliders();
 	}
@@ -559,18 +561,35 @@ export class Play extends Scene {
 		this.livesText?.setVisible(visible);
 	}
 
-	togglePause() {
+	private clampPlayerToWorldSides = () => {
+		if (!this.player?.sprite?.body || this.player.isDead || this.isPaused) {
+			return;
+		}
+		this.player.clampHorizontalWorldBounds(
+			this.player.sprite.body as Phaser.Physics.Arcade.Body,
+		);
+	};
+
+	requestPause() {
 		if (this.pausePanel) {
 			this.closePause();
 			return;
 		}
+		if (this.deathSequence?.isEscBlocked()) return;
+		if (this.isResetting) return;
+		this.togglePause();
+	}
+
+	togglePause() {
 		this.isPaused = true;
 		this.physics.pause();
 		this.pausePanel = this.add.container(0, 0).setDepth(250);
+		const cx = this.cameras.main.width / 2;
+		const cy = this.cameras.main.height / 2;
 		const bg = this.add
 			.rectangle(
-				this.cameras.main.width / 2,
-				this.cameras.main.height / 2,
+				cx,
+				cy,
 				this.cameras.main.width,
 				this.cameras.main.height,
 				0x0b1a2e,
@@ -578,26 +597,14 @@ export class Play extends Scene {
 			)
 			.setInteractive();
 		const title = this.add
-			.text(this.cameras.main.width / 2, this.cameras.main.height / 2 - 40, 'Paused', {
+			.text(cx, cy - 110, 'Paused', {
 				fontFamily: 'Pixelify Sans',
 				fontSize: '72px',
 				color: '#ffdd00',
 			})
 			.setOrigin(0.5);
-		const hint = this.add
-			.text(
-				this.cameras.main.width / 2,
-				this.cameras.main.height / 2 + 120,
-				'Esc: Resume   |   Q: Quit to menu',
-				{
-					fontFamily: 'Pixelify Sans',
-					fontSize: '32px',
-					color: '#fdfdfe',
-				},
-			)
-			.setOrigin(0.5);
 		const resumeBtn = this.add
-			.text(this.cameras.main.width / 2, this.cameras.main.height / 2 + 20, 'Resume', {
+			.text(cx, cy - 10, 'Resume', {
 				fontFamily: 'Pixelify Sans',
 				fontSize: '44px',
 				color: PALETTE_HEX.cloudWhite,
@@ -608,7 +615,7 @@ export class Play extends Scene {
 			.setInteractive({ useHandCursor: true });
 		resumeBtn.on('pointerdown', () => this.closePause());
 		const quitBtn = this.add
-			.text(this.cameras.main.width / 2, this.cameras.main.height / 2 + 90, 'Quit to menu', {
+			.text(cx, cy + 80, 'Quit to menu', {
 				fontFamily: 'Pixelify Sans',
 				fontSize: '44px',
 				color: PALETTE_HEX.cloudWhite,
@@ -622,7 +629,23 @@ export class Play extends Scene {
 			this.sound.stopAll();
 			this.scene.start('Menu');
 		});
-		this.pausePanel.add([bg, title, resumeBtn, quitBtn, hint]);
+		const pauseChildren: Phaser.GameObjects.GameObject[] = [
+			bg,
+			title,
+			resumeBtn,
+			quitBtn,
+		];
+		if (!isTouchDevice(this)) {
+			const hint = this.add
+				.text(cx, cy + 175, 'Esc: Resume   |   Q: Quit to menu', {
+					fontFamily: 'Pixelify Sans',
+					fontSize: '32px',
+					color: '#fdfdfe',
+				})
+				.setOrigin(0.5);
+			pauseChildren.push(hint);
+		}
+		this.pausePanel.add(pauseChildren);
 		this.pauseQuitKey = this.input.keyboard?.addKey(
 			Phaser.Input.Keyboard.KeyCodes.Q,
 		);
@@ -741,9 +764,7 @@ export class Play extends Scene {
 			{ key: 'canShootArrows', icon: 'bow' },
 		];
 
-		const startY = 320;
 		const boxSize = 280;
-		const cardRowHeight = 360;
 		const spacing = 40;
 		const cols = 3;
 		const downgradeable = abilityData.filter((data) => {
@@ -776,6 +797,25 @@ export class Play extends Scene {
 			return;
 		}
 
+		const rows = Math.ceil(downgradeable.length / cols);
+		const canvasH = this.cameras.main.height;
+		const titleBottom = 130;
+		const helperBand = 56;
+		const maxGridBottom = canvasH - helperBand;
+		let rowHeight = 360;
+		let gridH = rows * rowHeight + (rows - 1) * spacing;
+		const available = maxGridBottom - titleBottom;
+		if (gridH > available) {
+			rowHeight = Math.max(
+				boxSize,
+				Math.floor((available - (rows - 1) * spacing) / rows),
+			);
+			gridH = rows * rowHeight + (rows - 1) * spacing;
+		}
+		const startY = titleBottom + rowHeight / 2;
+		const lastRowCenterY = startY + (rows - 1) * (rowHeight + spacing);
+		const helperY = lastRowCenterY + rowHeight / 2 + 32;
+
 		const buttons: Phaser.GameObjects.Rectangle[] = [];
 		let selectedIndex = 0;
 
@@ -788,7 +828,7 @@ export class Play extends Scene {
 				startY,
 				boxSize,
 				spacing,
-				cardRowHeight,
+				rowHeight,
 			);
 
 			const cardW = boxSize;
@@ -840,7 +880,8 @@ export class Play extends Scene {
 				lineGap +
 				lossText.height +
 				padBottom;
-			const cardH = Math.min(cardRowHeight, Math.max(boxSize, contentH));
+			const cardH = Math.min(rowHeight, Math.max(boxSize, contentH));
+			const cardTop = y - cardH / 2;
 
 			mythText.destroy();
 			stateText.destroy();
@@ -863,9 +904,9 @@ export class Play extends Scene {
 			styleAbilityCard(button, false);
 			buttons.push(button);
 
-			addAbilityIcon(this, x, y - cardH / 2 + 84, data.icon);
+			addAbilityIcon(this, x, cardTop, cardH, data.icon);
 
-			let textY = y - cardH / 2 + iconSpace;
+			let textY = cardTop + iconSpace;
 			this.add
 				.text(x, textY, sanitizePixelFont(myth), {
 					fontFamily: 'Pixelify Sans',
@@ -900,10 +941,6 @@ export class Play extends Scene {
 				.setDepth(22);
 		});
 
-		const helperY =
-			startY +
-			Math.ceil(downgradeable.length / cols) * (cardRowHeight + spacing) +
-			24;
 		this.add
 			.text(
 				this.cameras.main.width / 2,
@@ -1134,7 +1171,7 @@ export class Play extends Scene {
 			styleAbilityCard(button, false);
 			buttons.push(button);
 
-			addAbilityIcon(this, x, y, data.icon);
+			addAbilityIcon(this, x, y - boxSize / 2, boxSize, data.icon);
 
 			// Add regain label (what you get back)
 			this.add

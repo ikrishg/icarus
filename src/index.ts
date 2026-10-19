@@ -1,5 +1,6 @@
 import type { Game } from 'phaser';
 import StartGame from './main';
+import { attachScaleRefresh } from './util/attachScaleRefresh';
 
 declare global {
 	interface Window {
@@ -10,5 +11,7 @@ declare global {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-	window.__icarusGame = StartGame('icarus-window');
+	const game = StartGame('icarus-window');
+	window.__icarusGame = game;
+	attachScaleRefresh(game);
 });

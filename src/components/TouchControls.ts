@@ -28,6 +28,7 @@ export function isTouchDevice(scene?: Scene): boolean {
 const MIN_TOUCH_CSS_PX = 44;
 const BASE_BTN_GAME_PX = 88;
 const BASE_MARGIN_GAME_PX = 24;
+const PLAYER_SPAWN_PAD = 40;
 
 export class TouchControls {
 	private scene: Scene;
@@ -47,8 +48,6 @@ export class TouchControls {
 	private prevShoot = false;
 	private prevDash = false;
 	visible = false;
-	private layoutSize = BASE_BTN_GAME_PX;
-	private layoutMargin = BASE_MARGIN_GAME_PX;
 	readonly tapTargets: {
 		right?: { x: number; y: number };
 		jump?: { x: number; y: number };
@@ -70,9 +69,14 @@ export class TouchControls {
 		this.onRestart = onRestart;
 	}
 
-	getLeftControlClearanceX(): number {
+	/** Minimum player center X so the sprite clears the left/right touch cluster. */
+	getMinSpawnX(): number {
 		if (!this.visible) return 0;
-		return this.layoutMargin + this.layoutSize + 16;
+		const { size, margin, gap } = this.layoutMetrics();
+		const leftX = margin + size / 2;
+		const rightX = leftX + size + gap;
+		const clusterRight = rightX + size / 2;
+		return clusterRight + PLAYER_SPAWN_PAD;
 	}
 
 	private layoutMetrics() {
@@ -89,8 +93,6 @@ export class TouchControls {
 			Math.ceil(16 / displayScale),
 		);
 		const gap = Math.max(16, Math.ceil(12 / displayScale));
-		this.layoutSize = size;
-		this.layoutMargin = margin;
 		return { size, margin, gap };
 	}
 
@@ -190,8 +192,8 @@ export class TouchControls {
 			},
 		);
 
-		const jumpY = baseY - size - gap;
-		const jumpX = rightX + size + gap * 2;
+		const jumpX = WIDTH - margin - size / 2;
+		const jumpY = baseY - size * 2 - gap * 2;
 		this.tapTargets.jump = { x: jumpX, y: jumpY };
 		this.makeButton(
 			jumpX,
@@ -221,7 +223,7 @@ export class TouchControls {
 
 		this.makeButton(
 			WIDTH - margin - size / 2,
-			jumpY,
+			baseY - size - gap,
 			size,
 			'Q',
 			() => {
