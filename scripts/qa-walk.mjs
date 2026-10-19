@@ -20,6 +20,68 @@ function checkSanitizePixelFont(sanitizePixelFont) {
 	return { flight, expectedFlight, flightOk, expectedAbout };
 }
 
+function expectedCanvasDisplaySize(vw, vh) {
+	const scale = Math.min(vw / 1920, vh / 1080);
+	return {
+		scale,
+		width: 1920 * scale,
+		height: 1080 * scale,
+	};
+}
+
+function canvasFitsViewport(game, vw, vh, tolerance = 8) {
+	const expected = expectedCanvasDisplaySize(vw, vh);
+	const canvas = document.querySelector('#icarus-window canvas');
+	const rect = canvas?.getBoundingClientRect();
+	const displayW = game?.scale?.displaySize?.width ?? 0;
+	const displayH = game?.scale?.displaySize?.height ?? 0;
+	const wOk =
+		Math.abs((rect?.width ?? 0) - expected.width) < tolerance &&
+		Math.abs(displayW - expected.width) < tolerance;
+	const hOk =
+		Math.abs((rect?.height ?? 0) - expected.height) < tolerance &&
+		Math.abs(displayH - expected.height) < tolerance;
+	return {
+		wOk,
+		hOk,
+		ok: wOk && hOk,
+		expected,
+		rectW: rect?.width ?? 0,
+		rectH: rect?.height ?? 0,
+		displayW,
+		displayH,
+	};
+}
+
+function collectSceneTexts(scene, out = []) {
+	if (!scene) return out;
+	for (const child of scene.children?.list ?? []) {
+		if (child.type === 'Text') out.push(child);
+		if (child.list) collectSceneTexts(child, out);
+	}
+	return out;
+}
+
+function smallestScreenTextPx(game, scene) {
+	if (!game || !scene) return { smallestScreenPx: 0, scale: 0 };
+	const scale = Math.min(
+		game.scale.displaySize.width / 1920,
+		game.scale.displaySize.height / 1080,
+	);
+	let smallest = Infinity;
+	for (const obj of collectSceneTexts(scene)) {
+		if (!obj?.active) continue;
+		const raw = obj.style?.fontSize ?? obj.fontSize;
+		const gamePx =
+			typeof raw === 'number' ? raw : parseFloat(String(raw || '0'));
+		if (gamePx > 0) smallest = Math.min(smallest, gamePx * scale);
+	}
+	return {
+		smallestScreenPx: smallest === Infinity ? 0 : smallest,
+		scale,
+	};
+}
+
 async function runPauseEscToggle(baseUrl) {
 	const browser = await chromium.launch();
 	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
@@ -531,38 +593,190 @@ async function runCanvasOrientationResize(baseUrl) {
 	});
 	await page.goto(baseUrl);
 	await page.waitForFunction(() => window.__icarusGame?.scene != null);
-	await page.waitForTimeout(1500);
-	await page.setViewportSize({ width: 844, height: 390 });
-	await page.waitForTimeout(400);
-	const result = await page.evaluate(() => {
-		window.__icarusGame?.scale.refresh();
-		const canvas = document.querySelector('#icarus-window canvas');
-		const rect = canvas?.getBoundingClientRect();
-		const vw = window.innerWidth;
-		const ratio = rect && vw ? rect.width / vw : 0;
-		return {
-			canvasWidth: rect?.width ?? 0,
-			viewportWidth: vw,
-			ratio,
-		};
-	});
-	await page.waitForTimeout(300);
+	await page.waitForTimeout(1200);
+	const sequence = [
+		{ width: 390, height: 844 },
+		{ width: 844, height: 390 },
+		{ width: 390, height: 844 },
+		{ width: 844, height: 390 },
+	];
+	for (const size of sequence) {
+		await page.setViewportSize(size);
+		await page.waitForTimeout(700);
+	}
 	const after = await page.evaluate(() => {
+		const game = window.__icarusGame;
+		const vw = window.innerWidth;
+		const vh = window.innerHeight;
+		const scale = Math.min(vw / 1920, vh / 1080);
+		const expectedW = 1920 * scale;
+		const expectedH = 1080 * scale;
 		const canvas = document.querySelector('#icarus-window canvas');
 		const rect = canvas?.getBoundingClientRect();
-		const vw = window.innerWidth;
-		const ratio = rect && vw ? rect.width / vw : 0;
+		const displayW = game?.scale?.displaySize?.width ?? 0;
+		const displayH = game?.scale?.displaySize?.height ?? 0;
+		const tolerance = 8;
+		const wOk =
+			Math.abs((rect?.width ?? 0) - expectedW) < tolerance &&
+			Math.abs(displayW - expectedW) < tolerance;
+		const hOk =
+			Math.abs((rect?.height ?? 0) - expectedH) < tolerance &&
+			Math.abs(displayH - expectedH) < tolerance;
 		return {
-			canvasWidth: rect?.width ?? 0,
-			viewportWidth: vw,
-			ratio,
+			vw,
+			vh,
+			wOk,
+			hOk,
+			ok: wOk && hOk,
+			expectedW,
+			expectedH,
+			rectW: rect?.width ?? 0,
+			rectH: rect?.height ?? 0,
+			displayW,
+			displayH,
 		};
 	});
 	await browser.close();
 	return {
 		...after,
-		canvasResizeOk: after.ratio >= 0.8,
-		immediateRatio: result.ratio,
+		canvasResizeOk: after.ok === true,
+	};
+}
+
+async function runPortraitGameplayPause(baseUrl) {
+	const browser = await chromium.launch();
+	const page = await browser.newPage({
+		viewport: { width: 390, height: 844 },
+		isMobile: true,
+		hasTouch: true,
+	});
+	await bootToPlay(page, baseUrl);
+	const portraitBoot = await page.evaluate(() => {
+		const blocker = document.getElementById('portrait-blocker');
+		const style = blocker ? getComputedStyle(blocker) : null;
+		const blockerVisible =
+			blocker &&
+			style?.display !== 'none' &&
+			style?.visibility !== 'hidden';
+		const play = window.__icarusGame?.scene.getScene('Play');
+		return {
+			blockerVisible,
+			scenePaused: Boolean(play?.isPaused),
+			physicsPaused: Boolean(play?.physics?.world?.isPaused),
+		};
+	});
+	await page.setViewportSize({ width: 844, height: 390 });
+	await page.waitForTimeout(600);
+	await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		if (play?.pausePanel) play.closePause();
+	});
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.waitForTimeout(700);
+	const afterRotate = await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		return {
+			scenePaused: Boolean(play?.isPaused),
+			physicsPaused: Boolean(play?.physics?.world?.isPaused),
+		};
+	});
+	await browser.close();
+	const portraitPauseOk =
+		portraitBoot.blockerVisible &&
+		portraitBoot.scenePaused &&
+		portraitBoot.physicsPaused &&
+		afterRotate.scenePaused &&
+		afterRotate.physicsPaused;
+	return { portraitPauseOk, portraitBoot, afterRotate };
+}
+
+async function runLandscapeMinText(baseUrl) {
+	const browser = await chromium.launch();
+	const page = await browser.newPage({
+		viewport: { width: 844, height: 390 },
+		isMobile: true,
+		hasTouch: true,
+	});
+	await bootToPlay(page, baseUrl);
+	const measureInPage = async () =>
+		page.evaluate(() => {
+			const game = window.__icarusGame;
+			const play = game?.scene.getScene('Play');
+			if (!game || !play) return { smallestScreenPx: 0, scale: 0 };
+			const scale = Math.min(
+				game.scale.displaySize.width / 1920,
+				game.scale.displaySize.height / 1080,
+			);
+			const texts = [];
+			const walk = (container) => {
+				for (const child of container?.list ?? []) {
+					if (child.type === 'Text') texts.push(child);
+					if (child.list) walk(child);
+				}
+			};
+			walk(play.children);
+			if (play.pausePanel?.list) walk(play.pausePanel);
+			let smallest = Infinity;
+			for (const obj of texts) {
+				if (!obj?.active) continue;
+				const raw = obj.style?.fontSize ?? obj.fontSize;
+				const gamePx =
+					typeof raw === 'number' ? raw : parseFloat(String(raw || '0'));
+				if (gamePx > 0) smallest = Math.min(smallest, gamePx * scale);
+			}
+			return {
+				smallestScreenPx: smallest === Infinity ? 0 : smallest,
+				scale,
+			};
+		});
+
+	const gameplay = await measureInPage();
+	await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		play.isResetting = true;
+		play.showAbilityChoiceScreen();
+	});
+	await page.waitForTimeout(400);
+	const loss = await measureInPage();
+	await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		play.children.list
+			.filter((c) => {
+				const depth = c.depth;
+				return depth >= 20 && depth <= 23;
+			})
+			.forEach((c) => c.destroy());
+		play.isResetting = true;
+		play.showAbilityGainScreen();
+	});
+	await page.waitForTimeout(400);
+	const regain = await measureInPage();
+	await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		play.children.list
+			.filter((c) => {
+				const depth = c.depth;
+				return depth >= 20 && depth <= 250;
+			})
+			.forEach((c) => c.destroy());
+		if (play.pausePanel) play.closePause();
+		play.isResetting = false;
+		play.isPaused = false;
+		play.physics.resume();
+		play.togglePause();
+	});
+	await page.waitForTimeout(400);
+	const pause = await measureInPage();
+	await browser.close();
+	const samples = [gameplay, loss, regain, pause];
+	const smallest = Math.min(...samples.map((s) => s.smallestScreenPx));
+	return {
+		gameplay,
+		loss,
+		regain,
+		pause,
+		smallestScreenPx: smallest,
+		landscapeMinTextOk: smallest >= 12,
 	};
 }
 
@@ -697,33 +911,6 @@ async function runMobile(baseUrl) {
 			portalMobileLevel2 && (await getLevelIndex(page)) === startIndex + 1;
 	}
 
-	const landscapeText = await page.evaluate(() => {
-		const game = window.__icarusGame;
-		const play = game?.scene.getScene('Play');
-		if (!game || !play) return { smallestScreenPx: 0, scale: 0 };
-		const scale = Math.min(
-			game.scale.displaySize.width / 1920,
-			game.scale.displaySize.height / 1080,
-		);
-		let smallest = Infinity;
-		const measure = (obj) => {
-			if (!obj?.active) return;
-			const raw = obj.style?.fontSize ?? obj.fontSize;
-			const gamePx =
-				typeof raw === 'number' ? raw : parseFloat(String(raw || '0'));
-			if (gamePx > 0) smallest = Math.min(smallest, gamePx * scale);
-		};
-		for (const child of play.children?.list ?? []) {
-			if (child.type === 'Text') measure(child);
-		}
-		measure(play.instructionText);
-		measure(play.livesText);
-		return {
-			smallestScreenPx: smallest === Infinity ? 0 : smallest,
-			scale,
-		};
-	});
-
 	await browser.close();
 	return {
 		widthRatio,
@@ -731,8 +918,6 @@ async function runMobile(baseUrl) {
 		touchMoveWorked,
 		touchJumpWorked,
 		portalMobileLevel2,
-		landscapeText,
-		landscapeMinTextOk: landscapeText.smallestScreenPx >= 12,
 		canvasInPlay,
 		viewport,
 	};
@@ -753,6 +938,8 @@ async function main() {
 	const groundDash = await runGroundDash(baseUrl);
 	const sideEdge = await runSideEdgeClamp(baseUrl);
 	const canvasResize = await runCanvasOrientationResize(baseUrl);
+	const portraitPause = await runPortraitGameplayPause(baseUrl);
+	const landscapeText = await runLandscapeMinText(baseUrl);
 	const lossScreen = await runLossScreenLayout(baseUrl);
 	const mobile = await runMobile(baseUrl);
 	server.close();
@@ -777,7 +964,8 @@ async function main() {
 		mobile.touchButtonCount === 1 &&
 		mobile.touchMoveWorked &&
 		mobile.touchJumpWorked &&
-		mobile.landscapeMinTextOk &&
+		landscapeText.landscapeMinTextOk &&
+		portraitPause.portraitPauseOk &&
 		ligature.flightOk &&
 		allOpeningRoutesOk &&
 		groundDash.groundDashOk &&
@@ -802,6 +990,8 @@ async function main() {
 				groundDash,
 				sideEdge,
 				canvasResize,
+				portraitPause,
+				landscapeText,
 				lossScreen,
 				mobile,
 				pass,

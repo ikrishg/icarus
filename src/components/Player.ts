@@ -193,7 +193,7 @@ export class Player {
 		const centerX = body.center.x;
 		const clamped = Phaser.Math.Clamp(centerX, minCenter, maxCenter);
 		if (Math.abs(centerX - clamped) > 0.01) {
-			body.x = clamped;
+			this.sprite.x += clamped - centerX;
 			body.velocity.x = 0;
 			body.updateFromGameObject();
 			return;

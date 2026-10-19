@@ -292,7 +292,8 @@ export class TouchControls {
 
 	setGameplayVisible(visible: boolean) {
 		if (!this.visible) return;
-		for (const node of this.gameplayNodes) {
+		const nodes = [...this.gameplayNodes, ...this.chromeNodes];
+		for (const node of nodes) {
 			if ('setVisible' in node && typeof node.setVisible === 'function') {
 				node.setVisible(visible);
 			}

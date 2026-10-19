@@ -197,6 +197,28 @@ export class Play extends Scene {
 		};
 		this.input.keyboard?.on('keydown-ESC', this.escKeyHandler);
 
+		if (isTouchDevice(this) && typeof window !== 'undefined') {
+			const portraitMq = window.matchMedia('(orientation: portrait)');
+			const pauseIfPortrait = () => {
+				if (portraitMq.matches) {
+					this.requestPause();
+				}
+			};
+			if (typeof portraitMq.addEventListener === 'function') {
+				portraitMq.addEventListener('change', pauseIfPortrait);
+			} else if (typeof portraitMq.addListener === 'function') {
+				portraitMq.addListener(pauseIfPortrait);
+			}
+			this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+				if (typeof portraitMq.removeEventListener === 'function') {
+					portraitMq.removeEventListener('change', pauseIfPortrait);
+				} else if (typeof portraitMq.removeListener === 'function') {
+					portraitMq.removeListener(pauseIfPortrait);
+				}
+			});
+			pauseIfPortrait();
+		}
+
 		if (isDebugPlayEnabled()) {
 			this.skipKeyHandler = () => {
 				if (this.scene.isActive('Win')) return;
@@ -1209,8 +1231,7 @@ export class Play extends Scene {
 				: `Choose up to ${maxSelections} to take back.`;
 		let gainHelperText = `${gainPickLine} Tap a card, or use the arrows and Enter.`;
 		if (!isTouchDevice(this)) {
-			gainHelperText +=
-				' Shift+Enter when done. D also finishes after your first pick.';
+			gainHelperText += ' Shift+Enter when done.';
 		}
 
 		let gainFinished = false;
@@ -1240,13 +1261,19 @@ export class Play extends Scene {
 				showDoneButton();
 			}
 
+			const cardTop = button.y - boxSize / 2;
+			const iconArea = Math.min(
+				ABILITY_ICON_MAX,
+				Math.max(48, boxSize * 0.2),
+			);
+			const returnedY = cardTop + 12 + iconArea + 24;
 			this.add
-				.text(button.x, button.y - 100, 'Returned', {
+				.text(button.x, returnedY, 'Returned', {
 					fontFamily: 'Pixelify Sans',
 					fontSize: '24px',
 					color: ABILITY_CARD_INK_HEX,
 				})
-				.setOrigin(0.5)
+				.setOrigin(0.5, 0)
 				.setDepth(23);
 
 			if (selectedAbilities >= maxSelections) {
@@ -1332,13 +1359,6 @@ export class Play extends Scene {
 			if (event.code === 'ArrowLeft' || event.code === 'KeyA') {
 				selectedIndex = Math.max(0, selectedIndex - 1);
 				updateSelection();
-			} else if (
-				doneButton?.active &&
-				event.code === 'KeyD' &&
-				!event.shiftKey &&
-				selectedAbilities >= 1
-			) {
-				finishGain();
 			} else if (event.code === 'ArrowRight' || event.code === 'KeyD') {
 				selectedIndex = Math.min(buttons.length - 1, selectedIndex + 1);
 				updateSelection();

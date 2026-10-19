@@ -36,7 +36,7 @@ export function abilityStateLine(
 			);
 			const afterLabel =
 				afterBeats === 1 ? '1 wingbeat' : `${afterBeats} wingbeats`;
-			return `${beats} → ${afterLabel}`;
+			return `Feathers: ${beats} -> ${afterLabel}`;
 		}
 		case 'visionLevel': {
 			const v = abilities.visionLevel;
@@ -46,8 +46,8 @@ export function abilityStateLine(
 		}
 		case 'dashLevel': {
 			const d = abilities.dashLevel;
-			if (d >= 2) return 'Speed: dash → walk';
-			if (d === 1) return 'Speed: walk → slow';
+			if (d >= 2) return 'Speed: dash -> walk';
+			if (d === 1) return 'Speed: walk -> slow';
 			return 'Speed: slow walk';
 		}
 		case 'canMoveLeft':
