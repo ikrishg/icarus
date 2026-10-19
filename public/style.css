@@ -55,7 +55,7 @@ body {
 	max-width: 20ch;
 }
 
-@media (orientation: portrait) and (max-width: 600px) {
+@media (orientation: portrait) and (max-width: 600px) and (pointer: coarse) {
 	#portrait-blocker {
 		display: flex;
 	}

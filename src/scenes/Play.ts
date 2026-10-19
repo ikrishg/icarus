@@ -16,6 +16,10 @@ import {
 } from '../util/abilityCopy';
 import { PALETTE, PALETTE_HEX } from '../util/palette';
 import { touchFontSizeStyle } from '../util/responsiveText';
+import {
+	isPortraitBlockerActive,
+	PORTRAIT_BLOCKER_MEDIA,
+} from '../util/portraitBlocker';
 import { touchChromeMetrics } from '../util/touchLayout';
 import { sanitizePixelFont } from '../util/text';
 
@@ -114,6 +118,7 @@ export class Play extends Scene {
 	private skipKeyHandler?: () => void;
 	private pausePanel?: Phaser.GameObjects.Container;
 	private isPaused = false;
+	private portraitBlockerPauseActive = false;
 	private runEndedOnDeath = false;
 
 	constructor() {
@@ -199,25 +204,21 @@ export class Play extends Scene {
 		this.input.keyboard?.on('keydown-ESC', this.escKeyHandler);
 
 		if (isTouchDevice(this) && typeof window !== 'undefined') {
-			const portraitMq = window.matchMedia('(orientation: portrait)');
-			const pauseIfPortrait = () => {
-				if (portraitMq.matches) {
-					this.requestPause();
-				}
-			};
-			if (typeof portraitMq.addEventListener === 'function') {
-				portraitMq.addEventListener('change', pauseIfPortrait);
-			} else if (typeof portraitMq.addListener === 'function') {
-				portraitMq.addListener(pauseIfPortrait);
+			const blockerMq = window.matchMedia(PORTRAIT_BLOCKER_MEDIA);
+			const onBlockerChange = () => this.syncPortraitBlockerPause();
+			if (typeof blockerMq.addEventListener === 'function') {
+				blockerMq.addEventListener('change', onBlockerChange);
+			} else if (typeof blockerMq.addListener === 'function') {
+				blockerMq.addListener(onBlockerChange);
 			}
 			this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-				if (typeof portraitMq.removeEventListener === 'function') {
-					portraitMq.removeEventListener('change', pauseIfPortrait);
-				} else if (typeof portraitMq.removeListener === 'function') {
-					portraitMq.removeListener(pauseIfPortrait);
+				if (typeof blockerMq.removeEventListener === 'function') {
+					blockerMq.removeEventListener('change', onBlockerChange);
+				} else if (typeof blockerMq.removeListener === 'function') {
+					blockerMq.removeListener(onBlockerChange);
 				}
 			});
-			pauseIfPortrait();
+			this.syncPortraitBlockerPause();
 		}
 
 		if (isDebugPlayEnabled()) {
@@ -556,6 +557,7 @@ export class Play extends Scene {
 		const minX = this.touchControls?.getMinSpawnX() ?? startPos.x;
 		this.player.revive(Math.max(startPos.x, minX), startPos.y);
 		this.setupLevelColliders();
+		this.syncPortraitBlockerPause();
 	}
 
 	createLivesHud() {
@@ -594,6 +596,39 @@ export class Play extends Scene {
 		);
 	};
 
+	handleDisplayResize(): void {
+		this.touchControls?.relayout();
+		this.syncPortraitBlockerPause();
+	}
+
+	private canResumeAfterPortraitBlocker(): boolean {
+		if (isPortraitBlockerActive()) return false;
+		if (this.deathSequence?.isEscBlocked()) return false;
+		if (this.isResetting || this.player?.isDead) return false;
+		if (this.pausePanel) return false;
+		return true;
+	}
+
+	syncPortraitBlockerPause(): void {
+		if (!isTouchDevice(this)) return;
+		if (isPortraitBlockerActive()) {
+			if (this.pausePanel) return;
+			if (this.portraitBlockerPauseActive) return;
+			this.portraitBlockerPauseActive = true;
+			if (!this.isPaused) {
+				this.isPaused = true;
+				this.physics.pause();
+			}
+			return;
+		}
+		if (!this.portraitBlockerPauseActive) return;
+		if (this.canResumeAfterPortraitBlocker()) {
+			this.portraitBlockerPauseActive = false;
+			this.isPaused = false;
+			this.physics.resume();
+		}
+	}
+
 	requestPause() {
 		if (this.pausePanel) {
 			this.closePause();
@@ -606,6 +641,7 @@ export class Play extends Scene {
 	}
 
 	togglePause() {
+		this.portraitBlockerPauseActive = false;
 		this.isPaused = true;
 		this.physics.pause();
 		this.pausePanel = this.add.container(0, 0).setDepth(250);
@@ -658,8 +694,28 @@ export class Play extends Scene {
 			bg,
 			title,
 			resumeBtn,
-			quitBtn,
 		];
+		if (isTouchDevice(this)) {
+			const restartBtn = this.add
+				.text(cx, cy + 55, 'Restart level', {
+					fontFamily: 'Pixelify Sans',
+					fontSize: '44px',
+					color: PALETTE_HEX.cloudWhite,
+					backgroundColor: PALETTE_HEX.deep,
+					padding: { x: 28, y: 14 },
+				})
+				.setOrigin(0.5)
+				.setInteractive({ useHandCursor: true });
+			restartBtn.on('pointerdown', () => {
+				this.closePause();
+				if (!this.isResetting) {
+					this.killPlayer('fall', { fast: true, spendLife: false });
+				}
+			});
+			pauseChildren.push(restartBtn);
+			quitBtn.setY(cy + 130);
+		}
+		pauseChildren.push(quitBtn);
 		if (!isTouchDevice(this)) {
 			const hint = this.add
 				.text(cx, cy + 175, 'Esc: Resume   |   Q: Quit to menu', {
@@ -689,6 +745,7 @@ export class Play extends Scene {
 		this.pausePanel = undefined;
 		this.isPaused = false;
 		this.physics.resume();
+		this.syncPortraitBlockerPause();
 	}
 
 	showLevelInstruction() {
@@ -1153,10 +1210,24 @@ export class Play extends Scene {
 			.setOrigin(0.5)
 			.setDepth(21);
 
-		const startY = 320;
-		const boxSize = 280;
+		let boxSize = 280;
 		const spacing = 40;
 		const cols = Math.min(3, upgradeableAbilities.length);
+		const rows = Math.ceil(upgradeableAbilities.length / cols);
+		const chromeMetrics = touchChromeMetrics(this);
+		const footerReserve = chromeMetrics.chromeH + 150;
+		const titleBottom = 130;
+		const maxGridBottom = this.cameras.main.height - footerReserve;
+		let gridH = rows * boxSize + (rows - 1) * spacing;
+		const available = maxGridBottom - titleBottom;
+		if (gridH > available) {
+			boxSize = Math.max(
+				200,
+				Math.floor((available - (rows - 1) * spacing) / rows),
+			);
+			gridH = rows * boxSize + (rows - 1) * spacing;
+		}
+		const startY = titleBottom + boxSize / 2;
 
 		let selectedAbilities = 0;
 		const buttons: Phaser.GameObjects.Rectangle[] = [];
@@ -1271,7 +1342,7 @@ export class Play extends Scene {
 			this.add
 				.text(button.x, returnedY, 'Returned', {
 					fontFamily: 'Pixelify Sans',
-					fontSize: '24px',
+					fontSize: touchFontSizeStyle(this, 28),
 					color: ABILITY_CARD_INK_HEX,
 				})
 				.setOrigin(0.5, 0)
@@ -1315,10 +1386,8 @@ export class Play extends Scene {
 			}
 		};
 
-		const helperY =
-			startY +
-			Math.ceil(upgradeableAbilities.length / cols) * (boxSize + spacing) +
-			16;
+		const lastRowCenterY = startY + (rows - 1) * (boxSize + spacing);
+		const helperY = lastRowCenterY + boxSize / 2 + 32;
 		const helperTextObj = this.add
 			.text(
 				this.cameras.main.width / 2,
@@ -1333,7 +1402,8 @@ export class Play extends Scene {
 				},
 			)
 			.setOrigin(0.5)
-			.setDepth(21);
+			.setDepth(21)
+			.setName('gain-helper');
 
 		let doneButtonBg: Phaser.GameObjects.Rectangle | undefined;
 		let doneButtonLabel: Phaser.GameObjects.Text | undefined;

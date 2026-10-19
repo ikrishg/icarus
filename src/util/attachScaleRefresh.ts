@@ -1,11 +1,15 @@
 import type { Game } from 'phaser';
 
 /** Keep Phaser FIT scale in sync when the viewport or orientation changes. */
-export function attachScaleRefresh(game: Game): void {
+export function attachScaleRefresh(
+	game: Game,
+	afterRefresh?: () => void,
+): void {
 	if (typeof window === 'undefined') return;
 
 	const refresh = () => {
 		game.scale.refresh();
+		afterRefresh?.();
 	};
 
 	window.addEventListener('resize', refresh);

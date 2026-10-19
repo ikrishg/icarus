@@ -13,5 +13,13 @@ declare global {
 document.addEventListener('DOMContentLoaded', () => {
 	const game = StartGame('icarus-window');
 	window.__icarusGame = game;
-	attachScaleRefresh(game);
+	attachScaleRefresh(game, () => {
+		const play = game.scene.getScene('Play') as {
+			handleDisplayResize?: () => void;
+			scene?: { isActive: (key: string) => boolean };
+		};
+		if (play?.scene?.isActive('Play')) {
+			play.handleDisplayResize?.();
+		}
+	});
 });

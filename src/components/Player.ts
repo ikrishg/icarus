@@ -57,11 +57,12 @@ export class Player {
 
 		// Set collision properties
 		this.sprite.setBounce(0.1);
-		this.sprite.setCollideWorldBounds(false);
+		this.sprite.setCollideWorldBounds(true);
 
 		const body = this.sprite.body as Phaser.Physics.Arcade.Body;
 		body.setSize(24, 44);
 		body.setOffset(15, 12);
+		body.setCollideWorldBounds(true);
 
 		// Setup keyboard controls
 		this.cursors = this.scene.input.keyboard?.createCursorKeys();
@@ -183,36 +184,32 @@ export class Player {
 		// Slight rotation based on vertical velocity for better feel
 		const rotation = Phaser.Math.Clamp(body.velocity.y * 0.0003, -0.2, 0.2);
 		this.sprite.setRotation(rotation);
-
-		this.clampHorizontalWorldBounds(body);
+		this.zeroVelocityIntoWalls(body);
 	}
 
-	clampHorizontalWorldBounds(body: Phaser.Physics.Arcade.Body): void {
+	zeroVelocityIntoWalls(body: Phaser.Physics.Arcade.Body): void {
 		const minCenter = body.halfWidth;
 		const maxCenter = WIDTH - body.halfWidth;
 		const centerX = body.center.x;
-		const clamped = Phaser.Math.Clamp(centerX, minCenter, maxCenter);
-		if (Math.abs(centerX - clamped) > 0.01) {
-			this.sprite.x += clamped - centerX;
-			body.velocity.x = 0;
-			body.updateFromGameObject();
-			return;
-		}
 		if (centerX <= minCenter + 0.5 && body.velocity.x < 0) {
 			body.velocity.x = 0;
 		}
 		if (centerX >= maxCenter - 0.5 && body.velocity.x > 0) {
 			body.velocity.x = 0;
 		}
-		const left = body.left;
-		const right = body.right;
-		if (left < 0) {
-			body.x += -left;
+	}
+
+	clampHorizontalWorldBounds(body: Phaser.Physics.Arcade.Body): void {
+		const minCenter = body.halfWidth;
+		const maxCenter = WIDTH - body.halfWidth;
+		const centerX = body.center.x;
+		if (centerX < minCenter) {
 			body.velocity.x = 0;
+			this.sprite.x += minCenter - centerX;
 			body.updateFromGameObject();
-		} else if (right > WIDTH) {
-			body.x -= right - WIDTH;
+		} else if (centerX > maxCenter) {
 			body.velocity.x = 0;
+			this.sprite.x += maxCenter - centerX;
 			body.updateFromGameObject();
 		}
 	}

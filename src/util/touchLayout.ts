@@ -1,17 +1,19 @@
 import type { Scene } from 'phaser';
-import { HEIGHT, PLAY_HUD_CLEARANCE_Y, WIDTH } from './constants';
+import { HEIGHT, WIDTH } from './constants';
 
 const MIN_TOUCH_CSS_PX = 44;
 const BASE_MARGIN_GAME_PX = 24;
+
+/** HUD band under the level title where Pause lives (left side). */
+const CHROME_ROW_Y = 108;
 
 export type TouchChromeMetrics = {
 	margin: number;
 	chromeW: number;
 	chromeH: number;
 	chromeGap: number;
-	chromeCenterX: number;
+	pauseCenterX: number;
 	pauseCenterY: number;
-	restartCenterY: number;
 	rightReserve: number;
 };
 
@@ -25,20 +27,17 @@ export function touchChromeMetrics(scene: Scene): TouchChromeMetrics {
 		Math.ceil(BASE_MARGIN_GAME_PX / displayScale),
 	);
 	const chromeH = Math.max(48, Math.ceil(MIN_TOUCH_CSS_PX / displayScale));
-	const chromeW = Math.max(120, Math.ceil(100 / displayScale));
+	const chromeW = Math.max(96, Math.ceil(88 / displayScale));
 	const chromeGap = Math.max(12, Math.ceil(8 / displayScale));
-	const chromeCenterX = WIDTH - margin - chromeW / 2;
-	const pauseCenterY = PLAY_HUD_CLEARANCE_Y + 8 + chromeH / 2;
-	const restartCenterY = pauseCenterY + chromeH + chromeGap;
-	const rightReserve = margin + chromeW + 16;
+	const pauseCenterX = margin + chromeW / 2;
+	const pauseCenterY = CHROME_ROW_Y;
 	return {
 		margin,
 		chromeW,
 		chromeH,
 		chromeGap,
-		chromeCenterX,
+		pauseCenterX,
 		pauseCenterY,
-		restartCenterY,
-		rightReserve,
+		rightReserve: margin + chromeW + 12,
 	};
 }

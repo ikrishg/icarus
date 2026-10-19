@@ -88,11 +88,11 @@ export class LevelManager {
 		const touch = isTouchDevice(this.scene);
 		const chrome = touch ? touchChromeMetrics(this.scene) : null;
 		const titleWrap = touch
-			? WIDTH - chrome!.margin * 2 - chrome!.rightReserve
+			? WIDTH - chrome!.rightReserve - chrome!.margin * 2
 			: this.scene.cameras.main.width - 80;
 		const title = this.scene.add
 			.text(
-				touch ? chrome!.margin + titleWrap / 2 : this.scene.cameras.main.width / 2,
+				this.scene.cameras.main.width / 2,
 				50,
 				`Level ${this.currentIndex + 1}: ${level.name}`,
 				{
@@ -338,6 +338,44 @@ export class LevelManager {
 		body.updateFromGameObject();
 		this.platforms.add(collider);
 		this.visuals.add(collider);
+	}
+
+	getWorldObstacleBounds(): Array<{
+		left: number;
+		right: number;
+		top: number;
+		bottom: number;
+	}> {
+		const rects: Array<{
+			left: number;
+			right: number;
+			top: number;
+			bottom: number;
+		}> = [];
+		for (const child of this.platforms.getChildren()) {
+			const body = (child as Phaser.GameObjects.Rectangle).body as
+				| Phaser.Physics.Arcade.StaticBody
+				| undefined;
+			if (!body) continue;
+			rects.push({
+				left: body.left,
+				right: body.right,
+				top: body.top,
+				bottom: body.bottom,
+			});
+		}
+		const portalBody = this.portalTrigger?.body as
+			| Phaser.Physics.Arcade.Body
+			| undefined;
+		if (portalBody) {
+			rects.push({
+				left: portalBody.left,
+				right: portalBody.right,
+				top: portalBody.top,
+				bottom: portalBody.bottom,
+			});
+		}
+		return rects;
 	}
 
 	setHudVisible(visible: boolean): void {

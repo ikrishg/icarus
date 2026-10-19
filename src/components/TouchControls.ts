@@ -60,7 +60,6 @@ export class TouchControls {
 		jump?: { x: number; y: number };
 	} = {};
 	private onPause?: () => void;
-	private onRestart?: () => void;
 
 	constructor(scene: Scene) {
 		this.scene = scene;
@@ -71,19 +70,50 @@ export class TouchControls {
 		this.build();
 	}
 
-	setTopBarHandlers(onPause: () => void, onRestart: () => void): void {
+	setTopBarHandlers(onPause: () => void, _onRestart: () => void): void {
 		this.onPause = onPause;
-		this.onRestart = onRestart;
 	}
 
 	/** Minimum player center X so the sprite clears the left/right touch cluster. */
 	getMinSpawnX(): number {
 		if (!this.visible) return 0;
-		const { size, margin, gap } = this.layoutMetrics();
-		const leftX = margin + size / 2;
-		const rightX = leftX + size + gap;
-		const clusterRight = rightX + size / 2;
+		let clusterRight = 0;
+		for (const node of this.gameplayNodes) {
+			if (!node.active || !('getBounds' in node)) continue;
+			const b = (
+				node as Phaser.GameObjects.GameObject & {
+					getBounds: () => Phaser.Geom.Rectangle;
+				}
+			).getBounds();
+			clusterRight = Math.max(clusterRight, b.right);
+		}
+		if (clusterRight <= 0) {
+			const { size, margin, gap } = this.layoutMetrics();
+			const leftX = margin + size / 2;
+			const rightX = leftX + size + gap;
+			clusterRight = rightX + size / 2;
+		}
 		return clusterRight + PLAYER_SPAWN_PAD;
+	}
+
+	relayout(): void {
+		if (!this.visible) return;
+		for (const node of [...this.gameplayNodes, ...this.chromeNodes]) {
+			node.destroy();
+		}
+		this.gameplayNodes = [];
+		this.chromeNodes = [];
+		this.tapTargets.right = undefined;
+		this.tapTargets.jump = undefined;
+		this.state.left = false;
+		this.state.right = false;
+		this.state.jump = false;
+		this.state.shoot = false;
+		this.state.dash = false;
+		this.prevJump = false;
+		this.prevShoot = false;
+		this.prevDash = false;
+		this.build();
 	}
 
 	private layoutMetrics() {
@@ -285,23 +315,13 @@ export class TouchControls {
 
 		const chrome = touchChromeMetrics(this.scene);
 		this.makeChromeButton(
-			chrome.chromeCenterX,
+			chrome.pauseCenterX,
 			chrome.pauseCenterY,
 			chrome.chromeW,
 			chrome.chromeH,
 			'Pause',
 			() => {
 				this.onPause?.();
-			},
-		);
-		this.makeChromeButton(
-			chrome.chromeCenterX,
-			chrome.restartCenterY,
-			chrome.chromeW,
-			chrome.chromeH,
-			'Restart',
-			() => {
-				this.onRestart?.();
 			},
 		);
 	}

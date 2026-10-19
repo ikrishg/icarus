@@ -503,59 +503,91 @@ async function runSideEdgeClamp(baseUrl) {
 
 	await page.evaluate(() => {
 		const play = window.__icarusGame?.scene.getScene('Play');
+		play?.levelManager?.goto(1);
+		play?.resetPlayer();
+		play?.clearLevelInstruction?.();
+		if (play?.abilityManager?.abilities) {
+			play.abilityManager.abilities.canMoveLeft = true;
+		}
+		if (play?.pausePanel) play.closePause();
 		const p = play?.player;
 		const body = p?.sprite?.body;
 		if (!p || !body) return;
-		const minX = body.halfWidth;
-		p.sprite.setPosition(minX, 956);
-		body.reset(minX, 956);
+		const minCenter = body.halfWidth;
+		p.sprite.setPosition(minCenter, 956);
 		body.updateFromGameObject();
+		p.clampHorizontalWorldBounds(body);
 	});
+	const leftSamples = [];
 	await page.keyboard.down('ArrowLeft');
-	await page.waitForTimeout(1600);
+	for (let i = 0; i < 10; i++) {
+		await page.waitForTimeout(100);
+		leftSamples.push(
+			await page.evaluate(
+				() =>
+					window.__icarusGame?.scene.getScene('Play')?.player?.sprite?.body
+						?.center?.x ?? 0,
+			),
+		);
+	}
 	await page.keyboard.up('ArrowLeft');
+	const leftRange =
+		Math.max(...leftSamples) - Math.min(...leftSamples);
 	const leftEdge = await page.evaluate(() => {
 		const play = window.__icarusGame?.scene.getScene('Play');
 		const p = play?.player;
 		const body = p?.sprite?.body;
 		if (!p || !body) return { ok: false, x: 0, minX: 0 };
-		const minX = body.halfWidth;
+		const minCenter = body.halfWidth;
 		const alive = !p.isDead && !play.isResetting && play.scene.isActive('Play');
 		return {
-			ok: alive && p.sprite.x >= minX - 1,
-			x: p.sprite.x,
-			minX,
+			ok: alive && body.center.x >= minCenter - 1,
+			x: body.center.x,
+			minX: minCenter,
 		};
 	});
 
 	await page.evaluate(() => {
 		const play = window.__icarusGame?.scene.getScene('Play');
+		if (play?.pausePanel) play.closePause();
 		const p = play?.player;
 		const body = p?.sprite?.body;
 		const camW = play?.cameras?.main?.width ?? 1920;
 		if (!p || !body) return;
-		const startX = camW - body.halfWidth;
-		p.sprite.setPosition(startX, 956);
-		body.reset(startX, 956);
+		const maxCenter = camW - body.halfWidth;
+		p.sprite.setPosition(maxCenter, 956);
 		body.updateFromGameObject();
+		p.clampHorizontalWorldBounds(body);
 		p.isDead = false;
 		play.isResetting = false;
 	});
+	const rightSamples = [];
 	await page.keyboard.down('ArrowRight');
-	await page.waitForTimeout(1600);
+	for (let i = 0; i < 10; i++) {
+		await page.waitForTimeout(100);
+		rightSamples.push(
+			await page.evaluate(
+				() =>
+					window.__icarusGame?.scene.getScene('Play')?.player?.sprite?.body
+						?.center?.x ?? 0,
+			),
+		);
+	}
 	await page.keyboard.up('ArrowRight');
+	const rightRange =
+		Math.max(...rightSamples) - Math.min(...rightSamples);
 	const rightEdge = await page.evaluate(() => {
 		const play = window.__icarusGame?.scene.getScene('Play');
 		const p = play?.player;
 		const body = p?.sprite?.body;
 		const camW = play?.cameras?.main?.width ?? 1920;
 		if (!p || !body) return { ok: false, x: 0, maxX: 0 };
-		const maxX = camW - body.halfWidth;
+		const maxCenter = camW - body.halfWidth;
 		const alive = !p.isDead && !play.isResetting && play.scene.isActive('Play');
 		return {
-			ok: alive && p.sprite.x <= maxX + 1,
-			x: p.sprite.x,
-			maxX,
+			ok: alive && body.center.x <= maxCenter + 1,
+			x: body.center.x,
+			maxX: maxCenter,
 		};
 	});
 
@@ -579,8 +611,15 @@ async function runSideEdgeClamp(baseUrl) {
 		leftEdge,
 		rightEdge,
 		fallKills,
+		leftRange,
+		rightRange,
+		wallJitterOk: leftRange <= 2 && rightRange <= 2,
 		sideEdgeClampOk:
-			leftEdge.ok && rightEdge.ok && fallKills === true,
+			leftEdge.ok &&
+			rightEdge.ok &&
+			fallKills === true &&
+			leftRange <= 2 &&
+			rightRange <= 2,
 	};
 }
 
@@ -690,6 +729,127 @@ async function runPortraitGameplayPause(baseUrl) {
 	return { portraitPauseOk, portraitBoot, afterRotate };
 }
 
+async function runPortraitPauseEdgeCases(baseUrl) {
+	const browser = await chromium.launch();
+	const page = await browser.newPage({
+		viewport: { width: 844, height: 390 },
+		isMobile: true,
+		hasTouch: true,
+	});
+	await bootToPlay(page, baseUrl);
+	await page.locator('canvas').click();
+	await page.keyboard.press('Escape');
+	await page.waitForTimeout(350);
+	const userPauseOpen = await page.evaluate(() =>
+		Boolean(window.__icarusGame?.scene.getScene('Play')?.pausePanel),
+	);
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.waitForTimeout(600);
+	const userPausePortrait = await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		return {
+			panel: Boolean(play?.pausePanel),
+			physicsPaused: Boolean(play?.physics?.world?.isPaused),
+		};
+	});
+	await page.setViewportSize({ width: 844, height: 390 });
+	await page.waitForTimeout(500);
+	const userPauseLandscape = await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		return {
+			panel: Boolean(play?.pausePanel),
+			physicsPaused: Boolean(play?.physics?.world?.isPaused),
+		};
+	});
+	await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		if (play?.pausePanel) play.closePause();
+	});
+	await page.evaluate(() => {
+		window.__icarusGame?.scene.getScene('Play')?.killPlayer('fall');
+	});
+	await page.waitForTimeout(250);
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.waitForTimeout(2000);
+	const deathPortraitMid = await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		return Boolean(play?.isPaused || play?.physics?.world?.isPaused);
+	});
+	await page.waitForTimeout(1800);
+	const deathPortraitAfter = await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const alive = !play?.player?.isDead && !play?.isResetting;
+		return {
+			alive,
+			paused: Boolean(play?.isPaused || play?.physics?.world?.isPaused),
+		};
+	});
+	await browser.close();
+	const userPauseStaysOk =
+		userPauseOpen &&
+		userPausePortrait.panel &&
+		userPausePortrait.physicsPaused &&
+		userPauseLandscape.panel &&
+		userPauseLandscape.physicsPaused;
+	const deathPortraitPauseOk =
+		deathPortraitMid && deathPortraitAfter.alive && deathPortraitAfter.paused;
+	return {
+		portraitPauseEdgeOk: userPauseStaysOk && deathPortraitPauseOk,
+		userPauseStaysOk,
+		deathPortraitPauseOk,
+	};
+}
+
+async function runDisplayPolicyChecks(baseUrl) {
+	const browser = await chromium.launch();
+	const desktopPage = await browser.newPage({
+		viewport: { width: 500, height: 800 },
+		hasTouch: false,
+	});
+	await bootToPlay(desktopPage, baseUrl);
+	const desktopNarrow = await desktopPage.evaluate(() => {
+		const blocker = document.getElementById('portrait-blocker');
+		const style = blocker ? getComputedStyle(blocker) : null;
+		const blockerVisible = blocker && style?.display === 'flex';
+		const play = window.__icarusGame?.scene.getScene('Play');
+		return {
+			blockerVisible,
+			physicsPaused: Boolean(play?.physics?.world?.isPaused),
+			pausePanel: Boolean(play?.pausePanel),
+		};
+	});
+	await desktopPage.close();
+	const tabletPage = await browser.newPage({
+		viewport: { width: 768, height: 1024 },
+		isMobile: true,
+		hasTouch: true,
+	});
+	await bootToPlay(tabletPage, baseUrl);
+	const tabletPortrait = await tabletPage.evaluate(() => {
+		const blocker = document.getElementById('portrait-blocker');
+		const style = blocker ? getComputedStyle(blocker) : null;
+		const blockerVisible = blocker && style?.display === 'flex';
+		const play = window.__icarusGame?.scene.getScene('Play');
+		return {
+			blockerVisible,
+			pausePanel: Boolean(play?.pausePanel),
+			scenePaused: Boolean(play?.isPaused),
+		};
+	});
+	await tabletPage.close();
+	await browser.close();
+	return {
+		desktopNarrowOk:
+			!desktopNarrow.blockerVisible && !desktopNarrow.physicsPaused,
+		tabletPortraitOk:
+			!tabletPortrait.blockerVisible &&
+			!tabletPortrait.pausePanel &&
+			!tabletPortrait.scenePaused,
+		desktopNarrow,
+		tabletPortrait,
+	};
+}
+
 function rectsOverlap(a, b) {
 	return (
 		a.left < b.right &&
@@ -703,6 +863,7 @@ async function runTouchTitleChromeClearance(baseUrl) {
 	const viewports = [
 		{ width: 640, height: 360 },
 		{ width: 844, height: 390 },
+		{ width: 932, height: 430 },
 	];
 	const failures = [];
 	const browser = await chromium.launch();
@@ -722,25 +883,53 @@ async function runTouchTitleChromeClearance(baseUrl) {
 				if (play.pausePanel) play.closePause();
 				play.setGameplayHudVisible(true);
 				play.showLevelInstruction();
-				const title = play.levelManager.getHudTitle?.();
-				if (!title?.getBounds) return { ok: false, reason: 'no-title' };
-				const tb = title.getBounds();
-				const titleRect = {
-					left: tb.left,
-					right: tb.right,
-					top: tb.top,
-					bottom: tb.bottom,
-				};
 				const chrome = play.touchControls.getChromeBounds?.() ?? [];
-				const overlap = chrome.some((c) => {
-					return (
-						titleRect.left < c.right &&
-						titleRect.right > c.left &&
-						titleRect.top < c.bottom &&
-						titleRect.bottom > c.top
-					);
-				});
-				return { ok: !overlap, titleRect, chrome };
+				const targets = [];
+				const title = play.levelManager.getHudTitle?.();
+				if (title?.getBounds) {
+					const tb = title.getBounds();
+					targets.push({
+						left: tb.left,
+						right: tb.right,
+						top: tb.top,
+						bottom: tb.bottom,
+						kind: 'title',
+					});
+				}
+				for (const o of play.levelManager.getWorldObstacleBounds?.() ??
+					[]) {
+					targets.push({ ...o, kind: 'obstacle' });
+				}
+				if (play.instructionPanel?.active) {
+					const ib = play.instructionPanel.getBounds();
+					targets.push({
+						left: ib.left,
+						right: ib.right,
+						top: ib.top,
+						bottom: ib.bottom,
+						kind: 'instruction-panel',
+					});
+				}
+				if (play.instructionText?.active) {
+					const it = play.instructionText.getBounds();
+					targets.push({
+						left: it.left,
+						right: it.right,
+						top: it.top,
+						bottom: it.bottom,
+						kind: 'instruction-text',
+					});
+				}
+				const overlap = chrome.some((c) =>
+					targets.some(
+						(t) =>
+							c.left < t.right &&
+							c.right > t.left &&
+							c.top < t.bottom &&
+							c.bottom > t.top,
+					),
+				);
+				return { ok: !overlap, chrome, targets };
 			}, level);
 			if (!result.ok) {
 				failures.push({ viewport: vp, level: level + 1, ...result });
@@ -770,7 +959,7 @@ async function runGainDoneLayout(baseUrl) {
 	const layout = await page.evaluate(() => {
 		const play = window.__icarusGame?.scene.getScene('Play');
 		const helper = play.children.list.find(
-			(c) => c.type === 'Text' && c.depth === 21,
+			(c) => c.name === 'gain-helper',
 		);
 		const doneBg = play.children.list.find(
 			(c) => c.type === 'Rectangle' && c.depth === 23,
@@ -989,6 +1178,11 @@ async function runMobile(baseUrl) {
 	});
 	const page = await context.newPage();
 	await bootToPlay(page, baseUrl);
+	await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		play?.clearLevelInstruction?.();
+		if (play?.pausePanel) play.closePause();
+	});
 
 	const canvasInPlay = await page.locator('canvas').boundingBox();
 	const viewport = page.viewportSize();
@@ -1000,6 +1194,14 @@ async function runMobile(baseUrl) {
 		return play?.touchControls?.visible ? 1 : 0;
 	});
 
+	await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const p = play?.player;
+		const body = p?.sprite?.body;
+		if (!p || !body) return;
+		p.sprite.setPosition(320, 956);
+		body.updateFromGameObject();
+	});
 	const beforeMove = await getPlayerPos(page);
 	const rightPoint = await page.evaluate(() => {
 		const game = window.__icarusGame;
@@ -1017,10 +1219,13 @@ async function runMobile(baseUrl) {
 		};
 	});
 	if (rightPoint) {
-		await page.mouse.move(rightPoint.x, rightPoint.y);
-		await page.mouse.down();
-		await page.waitForTimeout(2500);
-		await page.mouse.up();
+		await page.locator('canvas').click({ force: true });
+		await page.evaluate(async () => {
+			const play = window.__icarusGame?.scene.getScene('Play');
+			play?.touchControls?.setTouchState({ right: true });
+			await new Promise((resolve) => setTimeout(resolve, 2500));
+			play?.touchControls?.setTouchState({ right: false });
+		});
 	}
 	const afterMove = await getPlayerPos(page);
 	const touchMoveWorked = afterMove.x > beforeMove.x + 40;
@@ -1107,6 +1312,8 @@ async function main() {
 	const sideEdge = await runSideEdgeClamp(baseUrl);
 	const canvasResize = await runCanvasOrientationResize(baseUrl);
 	const portraitPause = await runPortraitGameplayPause(baseUrl);
+	const portraitPauseEdge = await runPortraitPauseEdgeCases(baseUrl);
+	const displayPolicy = await runDisplayPolicyChecks(baseUrl);
 	const landscapeText = await runLandscapeMinText(baseUrl);
 	const gainDoneLayout = await runGainDoneLayout(baseUrl);
 	const touchTitleChrome = await runTouchTitleChromeClearance(baseUrl);
@@ -1141,6 +1348,9 @@ async function main() {
 		touchTitleChrome.touchTitleChromeOk &&
 		touchPauseToggle.touchPauseToggleOk &&
 		portraitPause.portraitPauseOk &&
+		portraitPauseEdge.portraitPauseEdgeOk &&
+		displayPolicy.desktopNarrowOk &&
+		displayPolicy.tabletPortraitOk &&
 		ligature.flightOk &&
 		allOpeningRoutesOk &&
 		groundDash.groundDashOk &&
@@ -1166,6 +1376,8 @@ async function main() {
 				sideEdge,
 				canvasResize,
 				portraitPause,
+				portraitPauseEdge,
+				displayPolicy,
 				landscapeText,
 				gainDoneLayout,
 				touchTitleChrome,
