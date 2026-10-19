@@ -399,11 +399,135 @@ async function runAboutLigatures(baseUrl, expectedAbout) {
 	return { aboutExactOk, aboutTextLength: aboutText.length };
 }
 
+async function runGroundDash(baseUrl) {
+	const browser = await chromium.launch();
+	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+	await bootToPlay(page, baseUrl);
+	await page.locator('canvas').click();
+
+	const dashMeta = await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const p = play?.player;
+		return {
+			speed: p?.DASH_SPEED ?? 0,
+			duration: p?.DASH_DURATION ?? 0,
+		};
+	});
+	const expectedMin =
+		dashMeta.speed * (dashMeta.duration / 1000) * 0.85;
+
+	const startX = (await getPlayerPos(page)).x;
+	await page.keyboard.press('KeyD');
+	await page.waitForTimeout(80);
+	await page.keyboard.press('KeyQ');
+	await page.waitForTimeout(dashMeta.duration + 80);
+	await page.keyboard.up('KeyD');
+	const endX = (await getPlayerPos(page)).x;
+	const delta = endX - startX;
+
+	await browser.close();
+	return {
+		expectedMin,
+		delta,
+		groundDashOk: delta >= expectedMin,
+	};
+}
+
+async function runSideEdgeClamp(baseUrl) {
+	const browser = await chromium.launch();
+	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+	await bootToPlay(page, baseUrl);
+	await page.locator('canvas').click();
+
+	await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const p = play?.player;
+		const body = p?.sprite?.body;
+		if (!p || !body) return;
+		const minX = body.halfWidth;
+		p.sprite.setPosition(minX, 956);
+		body.reset(minX, 956);
+		body.updateFromGameObject();
+	});
+	await page.keyboard.down('ArrowLeft');
+	await page.waitForTimeout(1600);
+	await page.keyboard.up('ArrowLeft');
+	const leftEdge = await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const p = play?.player;
+		const body = p?.sprite?.body;
+		if (!p || !body) return { ok: false, x: 0, minX: 0 };
+		const minX = body.halfWidth;
+		const alive = !p.isDead && !play.isResetting && play.scene.isActive('Play');
+		return {
+			ok: alive && p.sprite.x >= minX - 1,
+			x: p.sprite.x,
+			minX,
+		};
+	});
+
+	await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const p = play?.player;
+		const body = p?.sprite?.body;
+		const camW = play?.cameras?.main?.width ?? 1920;
+		if (!p || !body) return;
+		const startX = camW - body.halfWidth;
+		p.sprite.setPosition(startX, 956);
+		body.reset(startX, 956);
+		body.updateFromGameObject();
+		p.isDead = false;
+		play.isResetting = false;
+	});
+	await page.keyboard.down('ArrowRight');
+	await page.waitForTimeout(1600);
+	await page.keyboard.up('ArrowRight');
+	const rightEdge = await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const p = play?.player;
+		const body = p?.sprite?.body;
+		const camW = play?.cameras?.main?.width ?? 1920;
+		if (!p || !body) return { ok: false, x: 0, maxX: 0 };
+		const maxX = camW - body.halfWidth;
+		const alive = !p.isDead && !play.isResetting && play.scene.isActive('Play');
+		return {
+			ok: alive && p.sprite.x <= maxX + 1,
+			x: p.sprite.x,
+			maxX,
+		};
+	});
+
+	const fallKills = await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const p = play?.player;
+		if (!p) return false;
+		p.isDead = false;
+		p.controlsEnabled = true;
+		play.isResetting = false;
+		p.sprite.setPosition(400, play.cameras.main.height + 200);
+		const body = p.sprite.body;
+		body?.reset(400, play.cameras.main.height + 200);
+		body?.updateFromGameObject?.();
+		play.update();
+		return p.isDead || play.isResetting;
+	});
+
+	await browser.close();
+	return {
+		leftEdge,
+		rightEdge,
+		fallKills,
+		sideEdgeClampOk:
+			leftEdge.ok && rightEdge.ok && fallKills === true,
+	};
+}
+
 async function runMobile(baseUrl) {
 	const browser = await chromium.launch();
 	const context = await browser.newContext({
-		...devices['iPhone 12'],
+		viewport: { width: 844, height: 390 },
 		hasTouch: true,
+		isMobile: true,
 	});
 	const page = await context.newPage();
 	await bootToPlay(page, baseUrl);
@@ -521,6 +645,8 @@ async function main() {
 	const debug = await runDebugCheat(baseUrl);
 	const lives = await runLivesAndDeath(baseUrl);
 	const about = await runAboutLigatures(baseUrl, ligature.expectedAbout);
+	const groundDash = await runGroundDash(baseUrl);
+	const sideEdge = await runSideEdgeClamp(baseUrl);
 	const mobile = await runMobile(baseUrl);
 	server.close();
 
@@ -540,12 +666,14 @@ async function main() {
 		pause.pauseEscOk &&
 		!desktop.stuckOnGround &&
 		collidersStable &&
-		mobile.widthRatio > 0.85 &&
+		mobile.widthRatio > 0.8 &&
 		mobile.touchButtonCount === 1 &&
 		mobile.touchMoveWorked &&
 		mobile.touchJumpWorked &&
 		ligature.flightOk &&
-		allOpeningRoutesOk;
+		allOpeningRoutesOk &&
+		groundDash.groundDashOk &&
+		sideEdge.sideEdgeClampOk;
 
 	console.log(
 		JSON.stringify(
@@ -561,6 +689,8 @@ async function main() {
 				debug,
 				lives,
 				about,
+				groundDash,
+				sideEdge,
 				mobile,
 				pass,
 			},

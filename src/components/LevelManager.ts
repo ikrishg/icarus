@@ -1,5 +1,6 @@
 import type { GameObjects, Scene } from 'phaser';
 import { LEVELS } from '../data/levels';
+import { isTouchDevice } from './TouchControls';
 import { DEPTH_PLAY_HUD_BAR, DEPTH_PLAY_HUD_TEXT } from '../util/constants';
 import type { LevelDefinition, ObstacleDef, Point } from '../util/types';
 import { Fireball } from './Fireball';
@@ -111,10 +112,7 @@ export class LevelManager {
 		this.visuals.add(titleBg);
 		this.hudObjects.push(titleBg);
 
-		const displayWidth =
-			this.scene.scale.displaySize?.width ??
-			(typeof window !== 'undefined' ? window.innerWidth : this.scene.scale.width);
-		if (displayWidth > 480) {
+		if (!isTouchDevice(this.scene)) {
 			const restartHint = this.scene.add
 				.text(
 					this.scene.cameras.main.width - 20,

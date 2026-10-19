@@ -1,5 +1,6 @@
 import type { Scene } from 'phaser';
 import { HEIGHT, WIDTH } from '../util/constants';
+import { PALETTE_HEX } from '../util/palette';
 
 export type TouchInputState = {
 	left: boolean;
@@ -30,7 +31,8 @@ const BASE_MARGIN_GAME_PX = 24;
 
 export class TouchControls {
 	private scene: Scene;
-	private nodes: Phaser.GameObjects.GameObject[] = [];
+	private gameplayNodes: Phaser.GameObjects.GameObject[] = [];
+	private chromeNodes: Phaser.GameObjects.GameObject[] = [];
 	private state: TouchInputState = {
 		left: false,
 		right: false,
@@ -45,10 +47,14 @@ export class TouchControls {
 	private prevShoot = false;
 	private prevDash = false;
 	visible = false;
+	private layoutSize = BASE_BTN_GAME_PX;
+	private layoutMargin = BASE_MARGIN_GAME_PX;
 	readonly tapTargets: {
 		right?: { x: number; y: number };
 		jump?: { x: number; y: number };
 	} = {};
+	private onPause?: () => void;
+	private onRestart?: () => void;
 
 	constructor(scene: Scene) {
 		this.scene = scene;
@@ -57,6 +63,16 @@ export class TouchControls {
 		}
 		this.visible = true;
 		this.build();
+	}
+
+	setTopBarHandlers(onPause: () => void, onRestart: () => void): void {
+		this.onPause = onPause;
+		this.onRestart = onRestart;
+	}
+
+	getLeftControlClearanceX(): number {
+		if (!this.visible) return 0;
+		return this.layoutMargin + this.layoutSize + 16;
 	}
 
 	private layoutMetrics() {
@@ -73,6 +89,8 @@ export class TouchControls {
 			Math.ceil(16 / displayScale),
 		);
 		const gap = Math.max(16, Math.ceil(12 / displayScale));
+		this.layoutSize = size;
+		this.layoutMargin = margin;
 		return { size, margin, gap };
 	}
 
@@ -83,6 +101,7 @@ export class TouchControls {
 		label: string,
 		onDown: () => void,
 		onUp: () => void,
+		chrome = false,
 	): void {
 		const bg = this.scene.add
 			.rectangle(x, y, size, size, 0xffffff, 0.45)
@@ -100,7 +119,7 @@ export class TouchControls {
 			})
 			.setOrigin(0.5)
 			.setScrollFactor(0)
-			.setDepth(200);
+			.setDepth(202);
 
 		bg.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
 			pointer.event?.preventDefault();
@@ -109,7 +128,33 @@ export class TouchControls {
 		bg.on('pointerup', onUp);
 		bg.on('pointerout', onUp);
 
-		this.nodes.push(bg, text);
+		const bucket = chrome ? this.chromeNodes : this.gameplayNodes;
+		bucket.push(bg, text);
+	}
+
+	private makeChromeButton(
+		x: number,
+		y: number,
+		label: string,
+		onTap: () => void,
+	): void {
+		const text = this.scene.add
+			.text(x, y, label, {
+				fontFamily: 'Pixelify Sans',
+				fontSize: '32px',
+				color: PALETTE_HEX.cloudWhite,
+				backgroundColor: PALETTE_HEX.deep,
+				padding: { x: 14, y: 8 },
+			})
+			.setOrigin(1, 0)
+			.setScrollFactor(0)
+			.setDepth(202)
+			.setInteractive({ useHandCursor: true });
+		text.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+			pointer.event?.preventDefault();
+			onTap();
+		});
+		this.chromeNodes.push(text);
 	}
 
 	private build() {
@@ -186,6 +231,14 @@ export class TouchControls {
 				this.state.dash = false;
 			},
 		);
+
+		const topY = 50;
+		this.makeChromeButton(WIDTH - margin, topY, 'Pause', () => {
+			this.onPause?.();
+		});
+		this.makeChromeButton(WIDTH - margin, topY + 48, 'Restart', () => {
+			this.onRestart?.();
+		});
 	}
 
 	beginFrame() {
@@ -211,7 +264,7 @@ export class TouchControls {
 
 	setGameplayVisible(visible: boolean) {
 		if (!this.visible) return;
-		for (const node of this.nodes) {
+		for (const node of this.gameplayNodes) {
 			if ('setVisible' in node && typeof node.setVisible === 'function') {
 				node.setVisible(visible);
 			}
@@ -219,9 +272,10 @@ export class TouchControls {
 	}
 
 	destroy() {
-		for (const node of this.nodes) {
+		for (const node of [...this.gameplayNodes, ...this.chromeNodes]) {
 			node.destroy();
 		}
-		this.nodes = [];
+		this.gameplayNodes = [];
+		this.chromeNodes = [];
 	}
 }

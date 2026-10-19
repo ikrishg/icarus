@@ -2,6 +2,7 @@ import type { Scene } from 'phaser';
 import type { AbilityManager } from './AbilityManager';
 import { Arrow } from './Arrow';
 import type { TouchControls } from './TouchControls';
+import { WIDTH } from '../util/constants';
 
 export class Player {
 	scene: Scene;
@@ -31,6 +32,7 @@ export class Player {
 	lastArrowTime = 0;
 	readonly ARROW_COOLDOWN = 500; // ms between arrows
 	isDashing = false;
+	private dashStartedInAir = false;
 	dashDirection = 0;
 	lastDashTime = 0;
 	readonly DASH_COOLDOWN = 1000; // ms between dashes
@@ -100,7 +102,9 @@ export class Player {
 		// Reset jump count when touching ground
 		if (body.touching.down) {
 			this.jumpCount = 0;
-			this.isDashing = false;
+			if (this.isDashing && this.dashStartedInAir) {
+				this.isDashing = false;
+			}
 		}
 
 		// Check for dash input BEFORE movement
@@ -122,6 +126,7 @@ export class Player {
 		if (this.isDashing) {
 			this.sprite.setVelocityX(this.DASH_SPEED * this.dashDirection);
 			this.updatePlayerAnimation(body, canMoveLeft);
+			this.clampHorizontalWorldBounds(body);
 			return; // Skip normal movement during dash
 		}
 
@@ -178,6 +183,20 @@ export class Player {
 		// Slight rotation based on vertical velocity for better feel
 		const rotation = Phaser.Math.Clamp(body.velocity.y * 0.0003, -0.2, 0.2);
 		this.sprite.setRotation(rotation);
+
+		this.clampHorizontalWorldBounds(body);
+	}
+
+	clampHorizontalWorldBounds(body: Phaser.Physics.Arcade.Body): void {
+		const halfW = body.halfWidth;
+		const minX = halfW;
+		const maxX = WIDTH - halfW;
+		const clampedX = Phaser.Math.Clamp(this.sprite.x, minX, maxX);
+		if (this.sprite.x !== clampedX) {
+			this.sprite.x = clampedX;
+			body.velocity.x = 0;
+			body.updateFromGameObject();
+		}
 	}
 
 	private updatePlayerAnimation(
@@ -205,6 +224,8 @@ export class Player {
 		// Play shoot sound for dash
 		this.scene.sound.play('shoot', { volume: 0.4 });
 
+		const body = this.sprite.body as Phaser.Physics.Arcade.Body;
+		this.dashStartedInAir = !body.touching.down;
 		this.isDashing = true;
 		// Dash in the direction player is facing
 		this.dashDirection = this.sprite.flipX ? -1 : 1;

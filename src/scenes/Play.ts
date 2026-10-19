@@ -42,6 +42,7 @@ function abilityCardPosition(
 	startY: number,
 	boxSize: number,
 	spacing: number,
+	rowHeight: number = boxSize,
 ): { x: number; y: number } {
 	const col = index % cols;
 	const row = Math.floor(index / cols);
@@ -55,7 +56,7 @@ function abilityCardPosition(
 	);
 	return {
 		x: startX + col * (boxSize + spacing),
-		y: startY + row * (boxSize + spacing),
+		y: startY + row * (rowHeight + spacing),
 	};
 }
 
@@ -142,6 +143,19 @@ export class Play extends Scene {
 
 		this.touchControls = new TouchControls(this);
 		this.player.touchControls = this.touchControls;
+		this.touchControls.setTopBarHandlers(
+			() => this.togglePause(),
+			() => {
+				if (!this.isResetting && !this.isPaused) {
+					this.killPlayer('fall', { fast: true, spendLife: false });
+				}
+			},
+		);
+		const spawn = this.levelManager.current.start;
+		const spawnMinX = this.touchControls.getLeftControlClearanceX();
+		if (spawn.x < spawnMinX) {
+			this.player.setPosition(spawnMinX, spawn.y);
+		}
 
 		// Create vision overlay
 		this.visionOverlay = this.add
@@ -153,7 +167,7 @@ export class Play extends Scene {
 				0x000000,
 			)
 			.setOrigin(0, 0)
-			.setDepth(100)
+			.setDepth(19)
 			.setAlpha(this.abilityManager.getVisionAlpha());
 
 		this.setupLevelColliders();
@@ -227,6 +241,10 @@ export class Play extends Scene {
 			}
 		}
 		this.player.update();
+		const playerBody = this.player.sprite.body as Phaser.Physics.Arcade.Body;
+		if (playerBody && !this.player.isDead) {
+			this.player.clampHorizontalWorldBounds(playerBody);
+		}
 
 		// Update vision overlay
 		if (this.visionOverlay) {
@@ -317,6 +335,9 @@ export class Play extends Scene {
 				this.restartCurrentLevel();
 			},
 			onComplete: () => {
+				if (this.player) {
+					this.player.controlsEnabled = true;
+				}
 				finishDeath();
 			},
 		});
@@ -334,9 +355,11 @@ export class Play extends Scene {
 		this.clearLevelInstruction();
 		this.clearColliders();
 		this.levelManager.goto(levelIndex);
+		const startPos = this.levelManager.current.start;
+		const minX = this.touchControls?.getLeftControlClearanceX() ?? startPos.x;
 		this.player.revive(
-			this.levelManager.current.start.x,
-			this.levelManager.current.start.y,
+			Math.max(startPos.x, minX),
+			startPos.y,
 		);
 		this.setupLevelColliders();
 		this.showLevelInstruction();
@@ -504,14 +527,15 @@ export class Play extends Scene {
 		this.clearLevelInstruction();
 		this.clearColliders();
 		const startPos = this.levelManager.current.start;
-		this.player.revive(startPos.x, startPos.y);
+		const minX = this.touchControls?.getLeftControlClearanceX() ?? startPos.x;
+		this.player.revive(Math.max(startPos.x, minX), startPos.y);
 		this.setupLevelColliders();
 	}
 
 	createLivesHud() {
 		this.livesText?.destroy();
 		this.livesText = this.add
-			.text(24, PLAY_HUD_CLEARANCE_Y + 8, this.livesLabel(), {
+			.text(24, 58, this.livesLabel(), {
 				fontFamily: 'Pixelify Sans',
 				fontSize: '40px',
 				color: '#fdfdfe',
@@ -563,16 +587,42 @@ export class Play extends Scene {
 		const hint = this.add
 			.text(
 				this.cameras.main.width / 2,
-				this.cameras.main.height / 2 + 40,
+				this.cameras.main.height / 2 + 120,
 				'Esc: Resume   |   Q: Quit to menu',
 				{
 					fontFamily: 'Pixelify Sans',
-					fontSize: '36px',
+					fontSize: '32px',
 					color: '#fdfdfe',
 				},
 			)
 			.setOrigin(0.5);
-		this.pausePanel.add([bg, title, hint]);
+		const resumeBtn = this.add
+			.text(this.cameras.main.width / 2, this.cameras.main.height / 2 + 20, 'Resume', {
+				fontFamily: 'Pixelify Sans',
+				fontSize: '44px',
+				color: PALETTE_HEX.cloudWhite,
+				backgroundColor: PALETTE_HEX.deep,
+				padding: { x: 28, y: 14 },
+			})
+			.setOrigin(0.5)
+			.setInteractive({ useHandCursor: true });
+		resumeBtn.on('pointerdown', () => this.closePause());
+		const quitBtn = this.add
+			.text(this.cameras.main.width / 2, this.cameras.main.height / 2 + 90, 'Quit to menu', {
+				fontFamily: 'Pixelify Sans',
+				fontSize: '44px',
+				color: PALETTE_HEX.cloudWhite,
+				backgroundColor: PALETTE_HEX.deep,
+				padding: { x: 28, y: 14 },
+			})
+			.setOrigin(0.5)
+			.setInteractive({ useHandCursor: true });
+		quitBtn.on('pointerdown', () => {
+			this.closePause();
+			this.sound.stopAll();
+			this.scene.start('Menu');
+		});
+		this.pausePanel.add([bg, title, resumeBtn, quitBtn, hint]);
 		this.pauseQuitKey = this.input.keyboard?.addKey(
 			Phaser.Input.Keyboard.KeyCodes.Q,
 		);
@@ -600,7 +650,7 @@ export class Play extends Scene {
 			lvl.instruction ?? 'Reach the portal.',
 		);
 
-		const panelY = PLAY_HUD_CLEARANCE_Y + 72;
+		const panelY = PLAY_HUD_CLEARANCE_Y + 110;
 		this.instructionPanel = this.add
 			.rectangle(
 				this.cameras.main.width / 2,
@@ -693,6 +743,7 @@ export class Play extends Scene {
 
 		const startY = 320;
 		const boxSize = 280;
+		const cardRowHeight = 360;
 		const spacing = 40;
 		const cols = 3;
 		const downgradeable = abilityData.filter((data) => {
@@ -737,10 +788,66 @@ export class Play extends Scene {
 				startY,
 				boxSize,
 				spacing,
+				cardRowHeight,
 			);
 
+			const cardW = boxSize;
+			const textW = cardW - 24;
+			const myth = ABILITY_MYTH_NAME[data.key];
+			const stateLine = sanitizePixelFont(
+				abilityStateLine(data.key, this.abilityManager.abilities),
+			);
+			const lossLine = sanitizePixelFont(ABILITY_LOSS_LINE[data.key]);
+
+			const mythText = this.add
+				.text(0, 0, sanitizePixelFont(myth), {
+					fontFamily: 'Pixelify Sans',
+					fontSize: '36px',
+					color: ABILITY_CARD_INK_HEX,
+					align: 'center',
+					wordWrap: { width: textW },
+				})
+				.setVisible(false);
+			const stateText = this.add
+				.text(0, 0, stateLine, {
+					fontFamily: 'Pixelify Sans',
+					fontSize: '30px',
+					color: ABILITY_CARD_INK_HEX,
+					align: 'center',
+					wordWrap: { width: textW },
+				})
+				.setVisible(false);
+			const lossText = this.add
+				.text(0, 0, lossLine, {
+					fontFamily: 'Pixelify Sans',
+					fontSize: '30px',
+					color: ABILITY_LOSS_EFFECT_HEX,
+					align: 'center',
+					wordWrap: { width: textW },
+				})
+				.setVisible(false);
+
+			const iconSpace = 88;
+			const lineGap = 10;
+			const padBottom = 16;
+			const mythH = mythText.height;
+			const stateH = stateText.height;
+			const contentH =
+				iconSpace +
+				mythH +
+				lineGap +
+				stateH +
+				lineGap +
+				lossText.height +
+				padBottom;
+			const cardH = Math.min(cardRowHeight, Math.max(boxSize, contentH));
+
+			mythText.destroy();
+			stateText.destroy();
+			lossText.destroy();
+
 			const button = this.add
-				.rectangle(x, y, boxSize, boxSize, ABILITY_CARD_FILL)
+				.rectangle(x, y, cardW, cardH, ABILITY_CARD_FILL)
 				.setDepth(21)
 				.setInteractive()
 				.setData('abilityKey', data.key)
@@ -749,59 +856,53 @@ export class Play extends Scene {
 					updateSelection();
 				})
 				.on('pointerdown', () => {
+					selectedIndex = buttons.indexOf(button);
 					selectAbility();
 				});
 
 			styleAbilityCard(button, false);
 			buttons.push(button);
 
-			addAbilityIcon(this, x, y, data.icon);
+			addAbilityIcon(this, x, y - cardH / 2 + 84, data.icon);
 
-			const myth = ABILITY_MYTH_NAME[data.key];
+			let textY = y - cardH / 2 + iconSpace;
 			this.add
-				.text(x, y + 50, sanitizePixelFont(myth), {
+				.text(x, textY, sanitizePixelFont(myth), {
 					fontFamily: 'Pixelify Sans',
-					fontSize: '28px',
+					fontSize: '36px',
 					color: ABILITY_CARD_INK_HEX,
 					align: 'center',
-					wordWrap: { width: boxSize - 20 },
+					wordWrap: { width: textW },
 				})
-				.setOrigin(0.5)
+				.setOrigin(0.5, 0)
 				.setDepth(22);
-
-			this.add
-				.text(
-					x,
-					y + 88,
-					sanitizePixelFont(
-						abilityStateLine(data.key, this.abilityManager.abilities),
-					),
-					{
-						fontFamily: 'Pixelify Sans',
-						fontSize: '22px',
-						color: ABILITY_CARD_INK_HEX,
-						align: 'center',
-						wordWrap: { width: boxSize - 20 },
-					},
-				)
-				.setOrigin(0.5)
-				.setDepth(22);
-
-			this.add
-				.text(x, y + 128, sanitizePixelFont(ABILITY_LOSS_LINE[data.key]), {
+			textY += mythH + lineGap;
+			const stateRendered = this.add
+				.text(x, textY, stateLine, {
 					fontFamily: 'Pixelify Sans',
-					fontSize: '22px',
+					fontSize: '30px',
+					color: ABILITY_CARD_INK_HEX,
+					align: 'center',
+					wordWrap: { width: textW },
+				})
+				.setOrigin(0.5, 0)
+				.setDepth(22);
+			textY += stateRendered.height + lineGap;
+			this.add
+				.text(x, textY, lossLine, {
+					fontFamily: 'Pixelify Sans',
+					fontSize: '30px',
 					color: ABILITY_LOSS_EFFECT_HEX,
 					align: 'center',
-					wordWrap: { width: boxSize - 20 },
+					wordWrap: { width: textW },
 				})
-				.setOrigin(0.5)
+				.setOrigin(0.5, 0)
 				.setDepth(22);
 		});
 
 		const helperY =
 			startY +
-			Math.ceil(downgradeable.length / cols) * (boxSize + spacing) +
+			Math.ceil(downgradeable.length / cols) * (cardRowHeight + spacing) +
 			24;
 		this.add
 			.text(
@@ -1024,6 +1125,7 @@ export class Play extends Scene {
 					updateSelection();
 				})
 				.on('pointerdown', () => {
+					selectedIndex = buttons.indexOf(button);
 					if (button.getData('selected')) return;
 					if (selectedAbilities >= maxSelections) return;
 					selectAbility();
@@ -1085,6 +1187,9 @@ export class Play extends Scene {
 			button.setStrokeStyle(3, ABILITY_CARD_INK, 1);
 			button.setData('selected', true);
 			selectedAbilities++;
+			if (selectedAbilities >= 1) {
+				showDoneButton();
+			}
 
 			this.add
 				.text(button.x, button.y - 100, 'Returned', {
@@ -1142,36 +1247,39 @@ export class Play extends Scene {
 				this.cameras.main.width / 2,
 				helperY,
 				sanitizePixelFont(
-					maxSelections === 1
-						? 'Choose 1 to take back.'
-						: `Choose ${maxSelections} to take back.`,
+					'Choose up to 2. Tap a card, or use the arrows and Enter.',
 				),
 				{
 					fontFamily: 'Pixelify Sans',
 					fontSize: '32px',
 					color: PALETTE_HEX.cardHelper,
 					align: 'center',
-				},
-			)
-			.setOrigin(0.5)
-			.setDepth(21);
-		this.add
-			.text(
-				this.cameras.main.width / 2,
-				helperY + 44,
-				sanitizePixelFont(
-					'Pick one. Arrow keys and Enter, or tap. Shift+Enter when done.',
-				),
-				{
-					fontFamily: 'Pixelify Sans',
-					fontSize: '28px',
-					color: '#fdfdfe',
-					align: 'center',
 					wordWrap: { width: this.cameras.main.width - 120 },
 				},
 			)
 			.setOrigin(0.5)
 			.setDepth(21);
+
+		let doneButton: Phaser.GameObjects.Text | undefined;
+		const showDoneButton = () => {
+			if (doneButton?.active) return;
+			doneButton = this.add
+				.text(this.cameras.main.width / 2, helperY + 52, 'Done', {
+					fontFamily: 'Pixelify Sans',
+					fontSize: '40px',
+					color: PALETTE_HEX.cloudWhite,
+					backgroundColor: PALETTE_HEX.deep,
+					padding: { x: 24, y: 12 },
+				})
+				.setOrigin(0.5)
+				.setDepth(23)
+				.setInteractive({ useHandCursor: true });
+			doneButton.on('pointerdown', () => {
+				if (selectedAbilities >= 1) {
+					finishGain();
+				}
+			});
+		};
 
 		const keyHandler = (event: KeyboardEvent) => {
 			if (event.code === 'ArrowLeft' || event.code === 'KeyA') {

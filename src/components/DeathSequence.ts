@@ -92,9 +92,13 @@ export class DeathSequence {
 				if (this.scene.anims.exists('icarus-fall')) {
 					sprite.play('icarus-fall');
 				}
-				sprite.setVelocity(0, -180);
-				body.enable = true;
-				body.setAllowGravity(true);
+				const fallStartY = sprite.y;
+				this.scene.tweens.add({
+					targets: sprite,
+					y: fallStartY + 115,
+					duration: 390,
+					ease: 'Sine.easeIn',
+				});
 				this.scene.tweens.add({
 					targets: sprite,
 					angle: 20,
@@ -176,6 +180,8 @@ export class DeathSequence {
 			sprite.setVelocity(0, 0);
 			sprite.setAngle(0);
 			options.onRebuild();
+			this.player.isDead = true;
+			this.player.controlsEnabled = false;
 		});
 
 		const fadeInAt = fast ? 450 : 1350;
@@ -218,6 +224,7 @@ export class DeathSequence {
 			body.enable = true;
 			body.setAllowGravity(true);
 			this.player.isDead = false;
+			this.player.controlsEnabled = true;
 			for (const key of battleKeys) {
 				const s = this.scene.sound.get(key);
 				if (s) {
