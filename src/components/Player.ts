@@ -63,6 +63,7 @@ export class Player {
 		body.setSize(24, 44);
 		body.setOffset(15, 12);
 		body.setCollideWorldBounds(true);
+		body.checkCollision.up = false;
 
 		// Setup keyboard controls
 		this.cursors = this.scene.input.keyboard?.createCursorKeys();
@@ -148,11 +149,23 @@ export class Player {
 		} else {
 			this.sprite.setVelocityX(0);
 		}
-		if (body.center.x <= minCenter && body.velocity.x < 0) {
-			body.velocity.x = 0;
+		if (body.blocked.left || body.center.x <= minCenter) {
+			if (body.velocity.x < 0) {
+				body.velocity.x = 0;
+			}
+			if (leftDown && canMoveLeft) {
+				this.sprite.x = minCenter;
+				body.updateFromGameObject();
+			}
 		}
-		if (body.center.x >= maxCenter && body.velocity.x > 0) {
-			body.velocity.x = 0;
+		if (body.blocked.right || body.center.x >= maxCenter) {
+			if (body.velocity.x > 0) {
+				body.velocity.x = 0;
+			}
+			if (rightDown) {
+				this.sprite.x = maxCenter;
+				body.updateFromGameObject();
+			}
 		}
 
 		// Jumping (with ability-based max jumps)

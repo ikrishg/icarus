@@ -364,18 +364,29 @@ export class LevelManager {
 				bottom: body.bottom,
 			});
 		}
-		const portalBody = this.portalTrigger?.body as
-			| Phaser.Physics.Arcade.Body
-			| undefined;
-		if (portalBody) {
-			rects.push({
-				left: portalBody.left,
-				right: portalBody.right,
-				top: portalBody.top,
-				bottom: portalBody.bottom,
-			});
+		const portalBounds = this.getPortalBounds();
+		if (portalBounds) {
+			rects.push(portalBounds);
 		}
 		return rects;
+	}
+
+	getPortalBounds(): {
+		left: number;
+		right: number;
+		top: number;
+		bottom: number;
+	} | null {
+		if (!this.portal?.active || !('getBounds' in this.portal)) {
+			return null;
+		}
+		const b = this.portal.getBounds();
+		return {
+			left: b.left,
+			right: b.right,
+			top: b.top,
+			bottom: b.bottom,
+		};
 	}
 
 	setHudVisible(visible: boolean): void {

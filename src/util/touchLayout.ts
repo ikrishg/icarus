@@ -4,9 +4,8 @@ import { HEIGHT, WIDTH } from './constants';
 const MIN_TOUCH_CSS_PX = 44;
 const BASE_MARGIN_GAME_PX = 24;
 
-/** HUD band under the level title where Pause lives (left side). */
-const CHROME_ROW_Y = 108;
-
+/** HUD band: Pause sits above Lives on the left. */
+const CHROME_ROW_Y = 52;
 export type TouchChromeMetrics = {
 	margin: number;
 	chromeW: number;
@@ -14,6 +13,7 @@ export type TouchChromeMetrics = {
 	chromeGap: number;
 	pauseCenterX: number;
 	pauseCenterY: number;
+	livesTextX: number;
 	rightReserve: number;
 };
 
@@ -30,7 +30,8 @@ export function touchChromeMetrics(scene: Scene): TouchChromeMetrics {
 	const chromeW = Math.max(96, Math.ceil(88 / displayScale));
 	const chromeGap = Math.max(12, Math.ceil(8 / displayScale));
 	const pauseCenterX = margin + chromeW / 2;
-	const pauseCenterY = CHROME_ROW_Y;
+	const pauseCenterY = CHROME_ROW_Y + chromeH / 2;
+	const livesTextX = margin + chromeW + 16;
 	return {
 		margin,
 		chromeW,
@@ -38,6 +39,7 @@ export function touchChromeMetrics(scene: Scene): TouchChromeMetrics {
 		chromeGap,
 		pauseCenterX,
 		pauseCenterY,
-		rightReserve: margin + chromeW + 12,
+		livesTextX,
+		rightReserve: livesTextX + 140,
 	};
 }

@@ -21,6 +21,8 @@ import {
 	PORTRAIT_BLOCKER_MEDIA,
 } from '../util/portraitBlocker';
 import { touchChromeMetrics } from '../util/touchLayout';
+
+const TOUCH_SPAWN_MAX_DELTA_FROM_START = 200;
 import { sanitizePixelFont } from '../util/text';
 
 const ABILITY_CARD_FILL = 0xd6c9b6;
@@ -263,6 +265,13 @@ export class Play extends Scene {
 	}
 
 	update() {
+		if (
+			isTouchDevice(this) &&
+			this.portraitBlockerPauseActive &&
+			!isPortraitBlockerActive()
+		) {
+			this.syncPortraitBlockerPause();
+		}
 		if (this.isPaused) return;
 		if (this.deathSequence?.consumeJumpBuffer()) {
 			const maxJumps = this.abilityManager.getMaxJumps();
@@ -340,6 +349,11 @@ export class Play extends Scene {
 		const finishDeath = () => {
 			this.setGameplayHudVisible(true);
 			this.isResetting = false;
+			if (!this.pausePanel && !isPortraitBlockerActive()) {
+				this.isPaused = false;
+				this.physics.resume();
+			}
+			this.syncPortraitBlockerPause();
 			if (this.runEndedOnDeath) {
 				this.scene.start('Dead');
 			}
@@ -383,11 +397,7 @@ export class Play extends Scene {
 		this.clearColliders();
 		this.levelManager.goto(levelIndex);
 		const startPos = this.levelManager.current.start;
-		const minX = this.touchControls?.getMinSpawnX() ?? startPos.x;
-		this.player.revive(
-			Math.max(startPos.x, minX),
-			startPos.y,
-		);
+		this.player.revive(this.touchSpawnX(startPos.x), startPos.y);
 		this.setupLevelColliders();
 		this.showLevelInstruction();
 		this.playBattleMusic();
@@ -459,6 +469,7 @@ export class Play extends Scene {
 				this.playBattleMusic();
 				this.showLevelInstruction();
 				this.isResetting = false;
+				this.syncPortraitBlockerPause();
 			}
 		});
 	}
@@ -549,21 +560,34 @@ export class Play extends Scene {
 		}
 	}
 
+	private touchSpawnX(startX: number): number {
+		if (!this.touchControls?.visible) return startX;
+		const clusterMin = this.touchControls.getMinSpawnX();
+		const floor = Math.max(startX, clusterMin);
+		const cap = startX + TOUCH_SPAWN_MAX_DELTA_FROM_START;
+		if (clusterMin > cap) {
+			return floor;
+		}
+		return Math.min(floor, cap);
+	}
+
 	resetPlayer() {
 		if (!this.player) return;
 		this.clearLevelInstruction();
 		this.clearColliders();
 		const startPos = this.levelManager.current.start;
-		const minX = this.touchControls?.getMinSpawnX() ?? startPos.x;
-		this.player.revive(Math.max(startPos.x, minX), startPos.y);
+		this.player.revive(this.touchSpawnX(startPos.x), startPos.y);
 		this.setupLevelColliders();
 		this.syncPortraitBlockerPause();
 	}
 
 	createLivesHud() {
 		this.livesText?.destroy();
+		const livesX = isTouchDevice(this)
+			? touchChromeMetrics(this).livesTextX
+			: 24;
 		this.livesText = this.add
-			.text(24, 58, this.livesLabel(), {
+			.text(livesX, 58, this.livesLabel(), {
 				fontFamily: 'Pixelify Sans',
 				fontSize: '40px',
 				color: '#fdfdfe',
@@ -626,6 +650,10 @@ export class Play extends Scene {
 			this.portraitBlockerPauseActive = false;
 			this.isPaused = false;
 			this.physics.resume();
+			return;
+		}
+		if (!this.physics.world.isPaused) {
+			this.isPaused = false;
 		}
 	}
 
@@ -664,8 +692,9 @@ export class Play extends Scene {
 				color: '#ffdd00',
 			})
 			.setOrigin(0.5);
+		const resumeY = isTouchDevice(this) ? cy - 70 : cy - 10;
 		const resumeBtn = this.add
-			.text(cx, cy - 10, 'Resume', {
+			.text(cx, resumeY, 'Resume', {
 				fontFamily: 'Pixelify Sans',
 				fontSize: '44px',
 				color: PALETTE_HEX.cloudWhite,
@@ -675,8 +704,9 @@ export class Play extends Scene {
 			.setOrigin(0.5)
 			.setInteractive({ useHandCursor: true });
 		resumeBtn.on('pointerdown', () => this.closePause());
+		const quitY = isTouchDevice(this) ? cy + 120 : cy + 80;
 		const quitBtn = this.add
-			.text(cx, cy + 80, 'Quit to menu', {
+			.text(cx, quitY, 'Quit to menu', {
 				fontFamily: 'Pixelify Sans',
 				fontSize: '44px',
 				color: PALETTE_HEX.cloudWhite,
@@ -697,7 +727,7 @@ export class Play extends Scene {
 		];
 		if (isTouchDevice(this)) {
 			const restartBtn = this.add
-				.text(cx, cy + 55, 'Restart level', {
+				.text(cx, cy + 25, 'Restart level', {
 					fontFamily: 'Pixelify Sans',
 					fontSize: '44px',
 					color: PALETTE_HEX.cloudWhite,
@@ -712,8 +742,9 @@ export class Play extends Scene {
 					this.killPlayer('fall', { fast: true, spendLife: false });
 				}
 			});
+			restartBtn.setY(cy + 25);
+			quitBtn.setY(cy + 120);
 			pauseChildren.push(restartBtn);
-			quitBtn.setY(cy + 130);
 		}
 		pauseChildren.push(quitBtn);
 		if (!isTouchDevice(this)) {
@@ -875,6 +906,7 @@ export class Play extends Scene {
 				this.playBattleMusic();
 				this.showLevelInstruction();
 				this.isResetting = false;
+				this.syncPortraitBlockerPause();
 			}
 			return;
 		}
@@ -1095,6 +1127,7 @@ export class Play extends Scene {
 				this.playBattleMusic();
 				this.showLevelInstruction();
 				this.isResetting = false;
+				this.syncPortraitBlockerPause();
 			}
 		};
 
@@ -1190,6 +1223,7 @@ export class Play extends Scene {
 				this.playBattleMusic();
 				this.showLevelInstruction();
 				this.isResetting = false;
+				this.syncPortraitBlockerPause();
 			}
 			return;
 		}
@@ -1383,6 +1417,7 @@ export class Play extends Scene {
 				this.playBattleMusic();
 				this.showLevelInstruction();
 				this.isResetting = false;
+				this.syncPortraitBlockerPause();
 			}
 		};
 

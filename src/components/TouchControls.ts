@@ -36,10 +36,13 @@ const MIN_TOUCH_CSS_PX = 44;
 const BASE_BTN_GAME_PX = 88;
 const BASE_MARGIN_GAME_PX = 24;
 const PLAYER_SPAWN_PAD = 40;
+/** Arcade body half-width at scale 3 (setSize 24×44). */
+const PLAYER_SPAWN_HALF_WIDTH = 40;
 
 export class TouchControls {
 	private scene: Scene;
 	private gameplayNodes: Phaser.GameObjects.GameObject[] = [];
+	private leftMovementNodes: Phaser.GameObjects.GameObject[] = [];
 	private chromeNodes: Phaser.GameObjects.GameObject[] = [];
 	private state: TouchInputState = {
 		left: false,
@@ -54,6 +57,7 @@ export class TouchControls {
 	private prevJump = false;
 	private prevShoot = false;
 	private prevDash = false;
+	private controlsShown = true;
 	visible = false;
 	readonly tapTargets: {
 		right?: { x: number; y: number };
@@ -74,11 +78,11 @@ export class TouchControls {
 		this.onPause = onPause;
 	}
 
-	/** Minimum player center X so the sprite clears the left/right touch cluster. */
+	/** Minimum player center X clearing only the left movement cluster (◀ ▶). */
 	getMinSpawnX(): number {
 		if (!this.visible) return 0;
 		let clusterRight = 0;
-		for (const node of this.gameplayNodes) {
+		for (const node of this.leftMovementNodes) {
 			if (!node.active || !('getBounds' in node)) continue;
 			const b = (
 				node as Phaser.GameObjects.GameObject & {
@@ -93,27 +97,92 @@ export class TouchControls {
 			const rightX = leftX + size + gap;
 			clusterRight = rightX + size / 2;
 		}
-		return clusterRight + PLAYER_SPAWN_PAD;
+		return clusterRight + PLAYER_SPAWN_PAD + PLAYER_SPAWN_HALF_WIDTH;
+	}
+
+	getLeftMovementButtonBounds(): Array<{
+		left: number;
+		right: number;
+		top: number;
+		bottom: number;
+	}> {
+		const out: Array<{
+			left: number;
+			right: number;
+			top: number;
+			bottom: number;
+		}> = [];
+		for (const node of this.leftMovementNodes) {
+			if (!node.active || !('getBounds' in node)) continue;
+			const b = (
+				node as Phaser.GameObjects.GameObject & {
+					getBounds: () => Phaser.Geom.Rectangle;
+				}
+			).getBounds();
+			out.push({
+				left: b.left,
+				right: b.right,
+				top: b.top,
+				bottom: b.bottom,
+			});
+		}
+		return out;
+	}
+
+	getGameplayButtonBounds(): Array<{
+		left: number;
+		right: number;
+		top: number;
+		bottom: number;
+	}> {
+		const out: Array<{
+			left: number;
+			right: number;
+			top: number;
+			bottom: number;
+		}> = [];
+		for (const node of this.gameplayNodes) {
+			if (!node.active || !('getBounds' in node)) continue;
+			const b = (
+				node as Phaser.GameObjects.GameObject & {
+					getBounds: () => Phaser.Geom.Rectangle;
+				}
+			).getBounds();
+			out.push({
+				left: b.left,
+				right: b.right,
+				top: b.top,
+				bottom: b.bottom,
+			});
+		}
+		return out;
 	}
 
 	relayout(): void {
 		if (!this.visible) return;
+		const held = {
+			left: this.state.left,
+			right: this.state.right,
+			jump: this.state.jump,
+			shoot: this.state.shoot,
+			dash: this.state.dash,
+		};
+		const show = this.controlsShown;
 		for (const node of [...this.gameplayNodes, ...this.chromeNodes]) {
 			node.destroy();
 		}
 		this.gameplayNodes = [];
+		this.leftMovementNodes = [];
 		this.chromeNodes = [];
 		this.tapTargets.right = undefined;
 		this.tapTargets.jump = undefined;
-		this.state.left = false;
-		this.state.right = false;
-		this.state.jump = false;
-		this.state.shoot = false;
-		this.state.dash = false;
-		this.prevJump = false;
-		this.prevShoot = false;
-		this.prevDash = false;
 		this.build();
+		this.state.left = held.left;
+		this.state.right = held.right;
+		this.state.jump = held.jump;
+		this.state.shoot = held.shoot;
+		this.state.dash = held.dash;
+		this.applyControlsVisible(show);
 	}
 
 	private layoutMetrics() {
@@ -140,8 +209,9 @@ export class TouchControls {
 		label: string,
 		onDown: () => void,
 		onUp: () => void,
-		chrome = false,
+		options?: { leftCluster?: boolean; chrome?: boolean },
 	): void {
+		const chrome = options?.chrome ?? false;
 		const bg = this.scene.add
 			.rectangle(x, y, size, size, 0xffffff, 0.45)
 			.setStrokeStyle(4, 0x1b1b1c, 0.9)
@@ -169,6 +239,9 @@ export class TouchControls {
 
 		const bucket = chrome ? this.chromeNodes : this.gameplayNodes;
 		bucket.push(bg, text);
+		if (options?.leftCluster) {
+			this.leftMovementNodes.push(bg);
+		}
 	}
 
 	private makeChromeButton(
@@ -255,6 +328,7 @@ export class TouchControls {
 			() => {
 				this.state.left = false;
 			},
+			{ leftCluster: true },
 		);
 
 		this.tapTargets.right = { x: rightX, y: baseY };
@@ -269,10 +343,11 @@ export class TouchControls {
 			() => {
 				this.state.right = false;
 			},
+			{ leftCluster: true },
 		);
 
 		const jumpX = WIDTH - margin - size / 2;
-		const jumpY = baseY - size * 2 - gap * 2;
+		const jumpY = baseY - size * 4.25 - gap * 3;
 		this.tapTargets.jump = { x: jumpX, y: jumpY };
 		this.makeButton(
 			jumpX,
@@ -324,6 +399,7 @@ export class TouchControls {
 				this.onPause?.();
 			},
 		);
+		this.applyControlsVisible(this.controlsShown);
 	}
 
 	beginFrame() {
@@ -347,7 +423,7 @@ export class TouchControls {
 		Object.assign(this.state, partial);
 	}
 
-	setGameplayVisible(visible: boolean) {
+	private applyControlsVisible(visible: boolean) {
 		if (!this.visible) return;
 		const nodes = [...this.gameplayNodes, ...this.chromeNodes];
 		for (const node of nodes) {
@@ -357,11 +433,18 @@ export class TouchControls {
 		}
 	}
 
+	setGameplayVisible(visible: boolean) {
+		if (!this.visible) return;
+		this.controlsShown = visible;
+		this.applyControlsVisible(visible);
+	}
+
 	destroy() {
 		for (const node of [...this.gameplayNodes, ...this.chromeNodes]) {
 			node.destroy();
 		}
 		this.gameplayNodes = [];
+		this.leftMovementNodes = [];
 		this.chromeNodes = [];
 	}
 }
