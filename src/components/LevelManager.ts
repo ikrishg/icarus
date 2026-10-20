@@ -282,10 +282,9 @@ export class LevelManager {
 					this.fireballs = this.fireballs.filter((fb) => fb.sprite?.active);
 				};
 
-				// Initial spawn after delay
-				this.scene.time.delayedCall(delay, spawnFireball);
+				const firstSpawn = this.scene.time.delayedCall(delay, spawnFireball);
+				this.fireballTimers.push(firstSpawn);
 
-				// Repeat spawning
 				const timer = this.scene.time.addEvent({
 					delay: interval,
 					callback: spawnFireball,

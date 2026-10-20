@@ -498,6 +498,7 @@ async function runAboutLigatures(baseUrl, expectedAbout) {
 async function runGroundDash(baseUrl) {
 	const browser = await chromium.launch();
 	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+	await applyCpuThrottleIfRequested(page);
 	await bootToPlay(page, baseUrl);
 	await page.locator('canvas').click();
 	await page.evaluate(() => {
@@ -530,7 +531,20 @@ async function runGroundDash(baseUrl) {
 		p.lastDashTime = 0;
 	});
 	await page.waitForTimeout(200);
-	const startX = (await getPlayerPos(page)).x;
+	await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const p = play?.player;
+		if (!play || !p) return;
+		const probe = { sum: 0, lastX: p.sprite.x, onStep: null };
+		probe.onStep = () => {
+			if (p.isDashing) {
+				probe.sum += Math.abs(p.sprite.x - probe.lastX);
+			}
+			probe.lastX = p.sprite.x;
+		};
+		play.physics.world.on('poststep', probe.onStep);
+		window.__icarusDashProbe = probe;
+	});
 	await page.keyboard.down('KeyD');
 	await page.keyboard.down('KeyQ');
 	await page.waitForFunction(
@@ -545,19 +559,21 @@ async function runGroundDash(baseUrl) {
 	);
 	await page.keyboard.up('KeyQ');
 	await page.keyboard.up('KeyD');
-	for (let i = 0; i < 4; i++) {
-		await page.evaluate(
-			() => new Promise((r) => requestAnimationFrame(r)),
-		);
-	}
-	const endX = (await getPlayerPos(page)).x;
-	const delta = endX - startX;
+	const dashDistance = await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const probe = window.__icarusDashProbe;
+		if (play && probe?.onStep) {
+			play.physics.world.off('poststep', probe.onStep);
+		}
+		delete window.__icarusDashProbe;
+		return probe?.sum ?? 0;
+	});
 
 	await browser.close();
 	return {
 		expectedMin,
-		delta,
-		groundDashOk: delta >= expectedMin,
+		delta: dashDistance,
+		groundDashOk: dashDistance >= expectedMin,
 	};
 }
 
@@ -1180,7 +1196,7 @@ async function runTouchSpawnSafety(baseUrl) {
 					clusterMin - startX,
 					clusterMin + 72 - startX,
 				);
-				const windowPx = 250;
+				const windowPx = (body?.halfWidth ?? 36) * 2 + 100;
 				const touchHazards = (min, max) => {
 					const hits = [];
 					for (const o of levelDef.obstacles ?? []) {
@@ -1428,50 +1444,54 @@ async function runWallJitterPlatformGuard(page) {
 			}
 		}
 		if (!plat) return { ok: false, reason: 'no-platform' };
-		const platformMin = plat.left + body.halfWidth;
-		const y = plat.top + plat.height * 0.5;
-		const startCenter = platformMin + 2;
-		player.sprite.setPosition(startCenter, y);
+		body.setAllowGravity(true);
+		const y = plat.top - body.halfHeight - 6;
+		const x = plat.left - body.halfWidth - 6;
+		player.sprite.setPosition(x, y);
 		body.updateFromGameObject();
-		player.sprite.setPosition(
-			player.sprite.x + (startCenter - body.center.x),
-			y,
-		);
-		body.updateFromGameObject();
-		body.setAllowGravity(false);
 		player.sprite.setVelocity(0, 0);
 		return {
 			ok: true,
-			anchor: body.center.x,
-			platformMin,
-			worldMin: body.halfWidth,
+			platLeft: plat.left,
+			platRight: plat.right,
+			platTop: plat.top,
+			platBottom: plat.bottom,
 		};
 	});
 	if (!setup?.ok) {
 		return { ok: false, reason: setup?.reason ?? 'setup' };
 	}
 	await page.waitForTimeout(80);
-	await page.keyboard.down('ArrowLeft');
-	const centers = [];
+	await page.keyboard.down('ArrowRight');
+	const frames = [];
 	for (let i = 0; i < 60; i++) {
-		centers.push(await sampleBodyCenterRaf(page));
+		frames.push(
+			await page.evaluate(() => {
+				const body =
+					window.__icarusGame?.scene.getScene('Play')?.player?.sprite?.body;
+				if (!body) return null;
+				return {
+					left: body.left,
+					right: body.right,
+					top: body.top,
+					bottom: body.bottom,
+				};
+			}),
+		);
 		await page.waitForTimeout(16);
 	}
-	await page.keyboard.up('ArrowLeft');
-	const range = Math.max(...centers) - Math.min(...centers);
-	const minCenter = Math.min(...centers);
-	const maxCenter = Math.max(...centers);
+	await page.keyboard.up('ArrowRight');
+	const valid = frames.filter(Boolean);
+	const penetrated = valid.some(
+		(f) =>
+			f.right > setup.platLeft + 0.5 &&
+			f.bottom > setup.platTop &&
+			f.top < setup.platBottom,
+	);
 	return {
-		ok:
-			range <= 1 &&
-			minCenter >= setup.platformMin - 2 &&
-			maxCenter <= setup.platformMin + 2 &&
-			minCenter > setup.worldMin + 40,
-		minCenter,
-		range,
-		anchor: setup.anchor,
-		platformMin: setup.platformMin,
-		centers,
+		ok: valid.length === 60 && !penetrated,
+		penetrated,
+		platLeft: setup.platLeft,
 	};
 }
 
@@ -1576,16 +1596,27 @@ async function runPausePanelLayout(baseUrl) {
 			const gapRestartQuit = restart
 				? quit.top - restart.bottom
 				: quit.top - resume.bottom;
+			const game = window.__icarusGame;
+			const scale = Math.min(
+				game.scale.displaySize.width / 1920,
+				game.scale.displaySize.height / 1080,
+			);
+			const cssTitleResume = gapTitleResume * scale;
+			const cssResumeRestart = gapResumeRestart * scale;
+			const cssRestartQuit = gapRestartQuit * scale;
 			const gapsOk = mobile
-				? gapTitleResume >= 16 &&
-					gapResumeRestart >= 16 &&
-					gapRestartQuit >= 16
+				? cssTitleResume >= 10 &&
+					cssResumeRestart >= 10 &&
+					cssRestartQuit >= 10
 				: gapTitleResume >= 16 && gapRestartQuit >= 16;
 			return {
 				ok: gapsOk,
 				gapTitleResume,
 				gapResumeRestart,
 				gapRestartQuit,
+				cssTitleResume,
+				cssResumeRestart,
+				cssRestartQuit,
 			};
 		}, vp.mobile);
 		if (!layout.ok) failures.push({ viewport: vp, ...layout });
@@ -1658,6 +1689,303 @@ async function resetPlayLevel(page, levelIdx = 0) {
 		play?.syncPortraitBlockerPause?.();
 	}, levelIdx);
 	await page.waitForTimeout(300);
+}
+
+async function runTouchRelayoutPreservesHold(baseUrl) {
+	const browser = await chromium.launch();
+	const page = await browser.newPage({
+		viewport: { width: 844, height: 390 },
+		isMobile: true,
+		hasTouch: true,
+	});
+	await bootToPlay(page, baseUrl);
+	await page.locator('canvas').click();
+	const rightPoint = await touchPointForTarget(page, 'right');
+	const client = await page.context().newCDPSession(page);
+	await client.send('Emulation.setTouchEmulationEnabled', {
+		enabled: true,
+		maxTouchPoints: 1,
+	});
+	const point = {
+		x: rightPoint.x,
+		y: rightPoint.y,
+		radiusX: 1,
+		radiusY: 1,
+		force: 1,
+		id: 0,
+	};
+	await client.send('Input.dispatchTouchEvent', {
+		type: 'touchStart',
+		touchPoints: [point],
+	});
+	await page.waitForTimeout(400);
+	const beforeResize = await getPlayerPos(page);
+	await page.setViewportSize({ width: 844, height: 340 });
+	await page.waitForTimeout(500);
+	const rightPoint2 = await touchPointForTarget(page, 'right');
+	await client.send('Input.dispatchTouchEvent', {
+		type: 'touchMove',
+		touchPoints: [{ ...point, x: rightPoint2.x, y: rightPoint2.y }],
+	});
+	await page.waitForTimeout(600);
+	const mid = await getPlayerPos(page);
+	await page.waitForTimeout(600);
+	const afterHold = await getPlayerPos(page);
+	const touchState = await page.evaluate(() => {
+		const input = window.__icarusGame?.scene
+			.getScene('Play')
+			?.touchControls?.getInput?.();
+		return { right: Boolean(input?.right) };
+	});
+	await client.send('Input.dispatchTouchEvent', {
+		type: 'touchEnd',
+		touchPoints: [],
+	});
+	await browser.close();
+	const movedWhileHeld =
+		touchState.right && afterHold.x - beforeResize.x > 40;
+	return {
+		touchRelayoutPreservesHoldOk:
+			touchState.right && movedWhileHeld && afterHold.x > mid.x - 5,
+		beforeResizeX: beforeResize.x,
+		afterHoldX: afterHold.x,
+		touchState,
+	};
+}
+
+async function runJumpInPlaceStable(baseUrl) {
+	const failures = [];
+	const browser = await chromium.launch();
+	for (const mobile of [false, true]) {
+		const page = await browser.newPage(
+			mobile
+				? { viewport: { width: 844, height: 390 }, isMobile: true, hasTouch: true }
+				: { viewport: { width: 1280, height: 720 } },
+		);
+		await bootToPlay(page, baseUrl);
+		await page.locator('canvas').click();
+		for (let level = 0; level < 15; level++) {
+			await page.evaluate((idx) => window.__icarusPrepareLevel?.(idx), level);
+			await page.waitForTimeout(150);
+			const startX = (await getPlayerPos(page)).x;
+			for (let i = 0; i < 6; i++) {
+				await page.keyboard.press('Space');
+				await page.waitForTimeout(140);
+			}
+			await page.waitForTimeout(350);
+			const endX = (await getPlayerPos(page)).x;
+			if (Math.abs(endX - startX) > 2) {
+				failures.push({ mobile, level: level + 1, startX, endX });
+			}
+		}
+		await page.close();
+	}
+	await browser.close();
+	return { jumpInPlaceOk: failures.length === 0, failures };
+}
+
+async function runPlatformSideJump(baseUrl) {
+	const browser = await chromium.launch();
+	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+	await bootToPlay(page, baseUrl);
+	await page.locator('canvas').click();
+	await page.evaluate(() => {
+		window.__icarusPrepareLevel?.(0);
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const p = play?.player;
+		const body = p?.sprite?.body;
+		if (!p || !body) return;
+		p.revive(300, 800);
+		body.updateFromGameObject();
+	});
+	await page.keyboard.down('ArrowRight');
+	await page.keyboard.down('Space');
+	const result = await page.evaluate(async () => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const p = play?.player;
+		const body = p?.sprite?.body;
+		if (!play || !p || !body) return { ok: false };
+		let plat = null;
+		for (const child of play.levelManager.platforms.getChildren()) {
+			const pb = child.body;
+			if (!pb || pb.width >= 1800) continue;
+			if (pb.left >= 340 && pb.left <= 360) plat = pb;
+		}
+		if (!plat) return { ok: false, reason: 'no-plat' };
+		const maxStep = play.abilityManager.getMoveSpeed() / 60 + 4;
+		let prevCx = body.center.x;
+		for (let i = 0; i < 50; i++) {
+			await new Promise((r) => requestAnimationFrame(r));
+			const cx = body.center.x;
+			if (!p.isDashing && Math.abs(cx - prevCx) > maxStep) {
+				return { ok: false, bigStep: Math.abs(cx - prevCx), frame: i };
+			}
+			const overlap =
+				body.right > plat.left + 0.5 &&
+				body.bottom > plat.top + 2 &&
+				body.top < plat.bottom - 2;
+			if (overlap) return { ok: false, overlap: true, frame: i };
+			prevCx = cx;
+		}
+		return { ok: true };
+	});
+	await page.keyboard.up('Space');
+	await page.keyboard.up('ArrowRight');
+	await browser.close();
+	return { platformSideJumpOk: Boolean(result?.ok), ...result };
+}
+
+async function runStaleDashQueue(baseUrl) {
+	const browser = await chromium.launch();
+	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+	await bootToPlay(page, baseUrl);
+	await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		play.abilityManager.abilities.dashLevel = 1;
+		play.isResetting = true;
+		play.showAbilityGainScreen();
+	});
+	await page.keyboard.press('KeyQ');
+	await page.waitForTimeout(200);
+	await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		play.isResetting = false;
+		play.abilityManager.abilities.dashLevel = 2;
+		play.player.controlsEnabled = true;
+		play.player.lastDashTime = 0;
+	});
+	await page.locator('canvas').click();
+	await page.keyboard.press('Enter');
+	await page.waitForTimeout(400);
+	const dashed = await page.evaluate(async () => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const p = play?.player;
+		if (!p) return true;
+		let saw = false;
+		for (let i = 0; i < 40; i++) {
+			await new Promise((r) => requestAnimationFrame(r));
+			if (p.isDashing) saw = true;
+		}
+		return saw;
+	});
+	await browser.close();
+	return { staleDashQueueOk: !dashed };
+}
+
+async function runFireballPauseStack(baseUrl) {
+	const browser = await chromium.launch();
+	const page = await browser.newPage({
+		viewport: { width: 844, height: 390 },
+		isMobile: true,
+		hasTouch: true,
+	});
+	await bootToPlay(page, baseUrl);
+	await page.evaluate(() => window.__icarusPrepareLevel?.(5));
+	await page.evaluate(() => {
+		window.__icarusGame?.scene.getScene('Play')?.requestPause();
+	});
+	await page.waitForTimeout(8000);
+	await page.evaluate(() => {
+		window.__icarusGame?.scene.getScene('Play')?.closePause();
+	});
+	await page.waitForTimeout(1200);
+	const count = await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		return play?.levelManager?.fireballs?.filter((f) => f.sprite?.active)
+			.length ?? 0;
+	});
+	await browser.close();
+	return { fireballPauseStackOk: count <= 1, activeFireballs: count };
+}
+
+async function sampleWallHoldL1(page, clampEnabled) {
+	await page.evaluate((enabled) => {
+		window.__icarusPrepareLevel?.(0);
+		const play = window.__icarusGame?.scene.getScene('Play');
+		if (play) play.qaWallClampEnabled = enabled;
+	}, clampEnabled);
+	await page.keyboard.down('ArrowLeft');
+	const centers = [];
+	for (let i = 0; i < 30; i++) {
+		centers.push(await sampleBodyCenterRaf(page));
+		await page.waitForTimeout(16);
+	}
+	await page.keyboard.up('ArrowLeft');
+	const range = Math.max(...centers) - Math.min(...centers);
+	return { range, ok: range <= 1 };
+}
+
+async function runWallClampMutation(baseUrl) {
+	const browser = await chromium.launch();
+	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+	await bootToPlay(page, baseUrl);
+	await page.locator('canvas').click();
+	const enabled = await sampleWallHoldL1(page, true);
+	const disabled = await sampleWallHoldL1(page, false);
+	await browser.close();
+	return {
+		wallClampMutationOk: enabled.ok && !disabled.ok,
+		enabled,
+		disabled,
+	};
+}
+
+async function runPortraitSpawnAfterRotate(baseUrl) {
+	const browser = await chromium.launch();
+	const page = await browser.newPage({
+		viewport: { width: 844, height: 390 },
+		isMobile: true,
+		hasTouch: true,
+	});
+	await bootToPlay(page, baseUrl);
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.waitForTimeout(500);
+	await page.evaluate(() => {
+		window.__icarusGame?.scene.getScene('Play')?.killPlayer('fall');
+	});
+	await page.waitForTimeout(4500);
+	await page.setViewportSize({ width: 844, height: 390 });
+	await page.waitForTimeout(800);
+	const spawnX = (await getPlayerPos(page)).x;
+	await browser.close();
+	return {
+		portraitSpawnLandscapeOk: spawnX >= 400 && spawnX <= 480,
+		spawnX,
+	};
+}
+
+async function runL15RealKeys(baseUrl) {
+	const browser = await chromium.launch();
+	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+	await bootToPlay(page, baseUrl);
+	await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		play.abilityManager.abilities.jumpLevel = 3;
+		play.abilityManager.abilities.dashLevel = 2;
+		play.abilityManager.abilities.canMoveLeft = true;
+		play.abilityManager.abilities.canShootArrows = true;
+		window.__icarusPrepareLevel?.(14);
+	});
+	await page.locator('canvas').click();
+	await page.keyboard.down('ArrowRight');
+	const deadline = Date.now() + 90000;
+	let won = false;
+	while (Date.now() < deadline) {
+		await page.keyboard.press('Space');
+		await page.waitForTimeout(450);
+		won = await page.evaluate(() =>
+			window.__icarusGame?.scene.isActive('Win'),
+		);
+		if (won) break;
+		const x = (await getPlayerPos(page)).x;
+		if (x > 1700) {
+			await page.keyboard.press('Space');
+			await page.waitForTimeout(800);
+		}
+	}
+	await page.keyboard.up('ArrowRight');
+	await browser.close();
+	return { l15RealKeysOk: won };
 }
 
 async function runTouchRelayoutClearsHold(baseUrl) {
@@ -1744,91 +2072,31 @@ async function runPortraitUnfreezeCases(baseUrl) {
 	await page.waitForTimeout(4500);
 	const deathCase = await assertUnfrozenAndMoving(page);
 
-	// Loss card
-	await resetPlayLevel(page, 0);
-	await page.evaluate(() => {
-		const play = window.__icarusGame?.scene.getScene('Play');
-		play.clearLevelInstruction?.();
-		play.isResetting = true;
-		play.abilityManager.abilities.jumpLevel = 3;
-		play.abilityManager.abilities.visionLevel = 1;
-		play.showAbilityChoiceScreen();
-	});
-	await page.waitForTimeout(400);
+	// Loss card via real portal on a lose level
+	await resetPlayLevel(page, 4);
+	await page.locator('canvas').click();
+	await teleportToGoal(page);
+	await waitForPortalAdvance(page, 4);
 	await portraitRoundTrip(page);
-	await page.evaluate(() => {
-		const play = window.__icarusGame?.scene.getScene('Play');
-		const btn = play.children.list.find(
-			(c) =>
-				c.type === 'Rectangle' &&
-				c.depth === 21 &&
-				c.input &&
-				c.getData?.('abilityKey'),
-		);
-		btn?.emit('pointerdown');
-		play.syncPortraitBlockerPause?.();
-	});
-	await page.waitForTimeout(800);
-	let lossCase = await assertUnfrozenAndMoving(page);
-	if (!lossCase.ok) {
-		await page.evaluate(() =>
-			window.__icarusGame?.scene.getScene('Play')?.syncPortraitBlockerPause?.(),
-		);
-		lossCase = await assertUnfrozenAndMoving(page);
-	}
+	await page.keyboard.press('Enter');
+	await page.waitForTimeout(1200);
+	const lossCase = await assertUnfrozenAndMoving(page);
 
-	// Gain card
-	await resetPlayLevel(page, 0);
-	await page.evaluate(() => {
-		const play = window.__icarusGame?.scene.getScene('Play');
-		play.clearLevelInstruction?.();
-		play.isResetting = true;
-		play.abilityManager.abilities.jumpLevel = 0;
-		play.abilityManager.abilities.dashLevel = 1;
-		play.abilityManager.abilities.visionLevel = 0;
-		play.showAbilityGainScreen();
-	});
-	await page.waitForTimeout(400);
+	// Gain card via real portal on gain level
+	await resetPlayLevel(page, 3);
+	await page.locator('canvas').click();
+	await teleportToGoal(page);
+	await waitForPortalAdvance(page, 3);
 	await portraitRoundTrip(page);
-	await page.evaluate(() => {
-		const play = window.__icarusGame?.scene.getScene('Play');
-		const abilityBtn = play.children.list.find(
-			(c) =>
-				c.type === 'Rectangle' &&
-				c.depth === 21 &&
-				c.input &&
-				c.getData?.('abilityKey'),
-		);
-		abilityBtn?.emit('pointerdown');
-	});
-	await page.waitForTimeout(250);
-	await page.evaluate(() => {
-		const play = window.__icarusGame?.scene.getScene('Play');
-		const doneBg = play.children.list.find(
-			(c) => c.type === 'Rectangle' && c.depth === 23 && c.input,
-		);
-		doneBg?.emit('pointerdown');
-	});
-	await page.waitForTimeout(800);
+	await page.keyboard.press('Enter');
+	await page.waitForTimeout(400);
+	await page.keyboard.press('Enter');
+	await page.waitForTimeout(1200);
 	const gainCase = await assertUnfrozenAndMoving(page);
 
-	// Level: portrait round-trip with gameplay chrome hidden (no manual unpause)
+	// Level: portrait during normal play (no manual state repair)
 	await resetPlayLevel(page, 0);
-	await page.evaluate(() => {
-		const play = window.__icarusGame?.scene.getScene('Play');
-		if (!play) return;
-		play.isResetting = true;
-		play.touchControls?.setGameplayVisible(false);
-	});
 	await portraitRoundTrip(page);
-	await page.evaluate(() => {
-		const play = window.__icarusGame?.scene.getScene('Play');
-		if (!play?.scene?.isActive()) return;
-		play.isResetting = false;
-		play.touchControls?.setGameplayVisible(true);
-		play.syncPortraitBlockerPause?.();
-		play.resetPlayer();
-	});
 	await page.waitForTimeout(400);
 	const levelCase = await assertUnfrozenAndMoving(page);
 
@@ -2177,6 +2445,12 @@ async function runMobile(baseUrl) {
 	};
 }
 
+async function applyCpuThrottleIfRequested(page) {
+	if (process.env.QA_CPU_THROTTLE !== '1') return;
+	const client = await page.context().newCDPSession(page);
+	await client.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+}
+
 async function main() {
 	const sanitizePixelFont = await loadSanitizePixelFont();
 	const ligature = checkSanitizePixelFont(sanitizePixelFont);
@@ -2203,6 +2477,14 @@ async function main() {
 	const pausePanelLayout = await runPausePanelLayout(baseUrl);
 	const touchButtonPlatform = await runTouchButtonPlatformClearance(baseUrl);
 	const touchRelayoutHold = await runTouchRelayoutClearsHold(baseUrl);
+	const touchRelayoutPreserve = await runTouchRelayoutPreservesHold(baseUrl);
+	const jumpInPlace = await runJumpInPlaceStable(baseUrl);
+	const platformSideJump = await runPlatformSideJump(baseUrl);
+	const staleDashQueue = await runStaleDashQueue(baseUrl);
+	const fireballPauseStack = await runFireballPauseStack(baseUrl);
+	const wallClampMutation = await runWallClampMutation(baseUrl);
+	const portraitSpawnLandscape = await runPortraitSpawnAfterRotate(baseUrl);
+	const l15RealKeys = await runL15RealKeys(baseUrl);
 	const portraitUnfreeze = await runPortraitUnfreezeCases(baseUrl);
 	const touchPauseToggle = await runTouchPauseToggle(baseUrl);
 	const lossScreen = await runLossScreenLayout(baseUrl);
@@ -2238,6 +2520,14 @@ async function main() {
 		pausePanelLayout.pausePanelLayoutOk &&
 		touchButtonPlatform.touchButtonPlatformOk &&
 		touchRelayoutHold.touchRelayoutClearsHoldOk &&
+		touchRelayoutPreserve.touchRelayoutPreservesHoldOk &&
+		jumpInPlace.jumpInPlaceOk &&
+		platformSideJump.platformSideJumpOk &&
+		staleDashQueue.staleDashQueueOk &&
+		fireballPauseStack.fireballPauseStackOk &&
+		wallClampMutation.wallClampMutationOk &&
+		portraitSpawnLandscape.portraitSpawnLandscapeOk &&
+		l15RealKeys.l15RealKeysOk &&
 		portraitUnfreeze.portraitUnfreezeOk &&
 		touchPauseToggle.touchPauseToggleOk &&
 		portraitPause.portraitPauseOk &&
@@ -2279,6 +2569,14 @@ async function main() {
 				pausePanelLayout,
 				touchButtonPlatform,
 				touchRelayoutHold,
+				touchRelayoutPreserve,
+				jumpInPlace,
+				platformSideJump,
+				staleDashQueue,
+				fireballPauseStack,
+				wallClampMutation,
+				portraitSpawnLandscape,
+				l15RealKeys,
 				portraitUnfreeze,
 				touchPauseToggle,
 				lossScreen,

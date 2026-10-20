@@ -94,25 +94,51 @@ export class Player {
 			this.wasd.right.on('down', () => {
 				this.sprite.setFlipX(false);
 				if (this.qKey?.isDown) {
-					this.keyboardDashQueued = true;
+					this.queueKeyboardDash();
 				}
 			});
 			this.wasd.left.on('down', () => {
 				if (this.abilityManager.abilities.canMoveLeft) {
 					this.sprite.setFlipX(true);
 					if (this.qKey?.isDown) {
-						this.keyboardDashQueued = true;
+						this.queueKeyboardDash();
 					}
 				}
 			});
-			this.qKey.on('down', () => {
-				this.keyboardDashQueued = true;
-			});
+			this.qKey.on('down', () => this.queueKeyboardDash());
+		}
+	}
+
+	private canQueueKeyboardDash(): boolean {
+		if (!this.controlsEnabled || this.isDead || !this.abilityManager.canDash()) {
+			return false;
+		}
+		const play = this.scene as {
+			isPaused?: boolean;
+			isResetting?: boolean;
+			pausePanel?: unknown;
+		};
+		if (play.isPaused || play.isResetting || play.pausePanel) {
+			return false;
+		}
+		return true;
+	}
+
+	private queueKeyboardDash(): void {
+		if (this.canQueueKeyboardDash()) {
+			this.keyboardDashQueued = true;
 		}
 	}
 
 	update() {
-		if (!this.sprite.body || this.isDead || !this.controlsEnabled) return;
+		if (!this.sprite.body || this.isDead) {
+			this.keyboardDashQueued = false;
+			return;
+		}
+		if (!this.canQueueKeyboardDash()) {
+			this.keyboardDashQueued = false;
+		}
+		if (!this.controlsEnabled) return;
 
 		this.touchControls?.beginFrame();
 		const touch = this.touchControls?.getInput();
@@ -137,8 +163,10 @@ export class Player {
 
 		// Dash before movement; keyboard queue handles Q/D same-frame presses
 		if (this.abilityManager.canDash()) {
-			const dashPressed = this.keyboardDashQueued || touch?.dashJustDown;
+			const keyboardDash =
+				this.keyboardDashQueued && this.canQueueKeyboardDash();
 			this.keyboardDashQueued = false;
+			const dashPressed = keyboardDash || touch?.dashJustDown;
 			if (dashPressed) {
 				const now = Date.now();
 				if (now - this.lastDashTime > this.DASH_COOLDOWN) {
@@ -223,36 +251,10 @@ export class Player {
 		}
 
 		this.updatePlayerAnimation(body, canMoveLeft);
-		this.clampBesidePlatforms(body);
 
 		// Slight rotation based on vertical velocity for better feel
 		const rotation = Phaser.Math.Clamp(body.velocity.y * 0.0003, -0.2, 0.2);
 		this.sprite.setRotation(rotation);
-	}
-
-	clampBesidePlatforms(body: Phaser.Physics.Arcade.Body): void {
-		const lm = (this.scene as { levelManager?: { platforms: Phaser.Physics.Arcade.StaticGroup } })
-			.levelManager;
-		if (!lm) return;
-		for (const child of lm.platforms.getChildren()) {
-			const plat = (child as Phaser.GameObjects.GameObject).body as
-				| Phaser.Physics.Arcade.StaticBody
-				| undefined;
-			if (!plat || plat.width >= 1800) continue;
-			const platMinCenter = plat.left + body.halfWidth;
-			const inPlatY =
-				body.center.y >= plat.top - 12 && body.center.y <= plat.bottom + 12;
-			if (!inPlatY || body.center.x > plat.right + body.halfWidth + 8) {
-				continue;
-			}
-			if (body.center.x < platMinCenter) {
-				this.sprite.x += platMinCenter - body.center.x;
-				body.updateFromGameObject();
-				body.velocity.x = 0;
-			} else if (body.center.x <= platMinCenter + 4 && body.velocity.x < 0) {
-				body.velocity.x = 0;
-			}
-		}
 	}
 
 	/** Post-step only: correct when the body center is past the world edge (dash / knockback). */
@@ -309,6 +311,15 @@ export class Player {
 			}
 			this.sprite.x += maxCenter - centerX;
 			body.updateFromGameObject();
+		}
+		if (body.blocked.left || body.blocked.right) {
+			const snapped = Math.round(body.center.x);
+			const err = snapped - body.center.x;
+			if (Math.abs(err) <= 1) {
+				this.sprite.x += err;
+				body.updateFromGameObject();
+				this.prevBodyCenterX = body.center.x;
+			}
 		}
 	}
 
@@ -389,6 +400,7 @@ export class Player {
 	}
 
 	revive(x: number, y: number) {
+		this.keyboardDashQueued = false;
 		this.isDead = false;
 		this.sprite.clearTint();
 		this.sprite.setRotation(0);

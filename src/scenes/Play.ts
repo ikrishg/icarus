@@ -29,7 +29,12 @@ import { touchChromeMetrics } from '../util/touchLayout';
 
 /** Max touch spawn offset from authored start (buttons are translucent). */
 const TOUCH_SPAWN_MAX_DELTA_FROM_START = 72;
-const TOUCH_HAZARD_WINDOW_PX = 250;
+
+/** Hazard exclusivity window ahead of spawn: player body width + 100px. */
+function touchHazardWindowPx(bodyHalfWidth: number): number {
+	return bodyHalfWidth * 2 + 100;
+}
+
 import { sanitizePixelFont } from '../util/text';
 
 const ABILITY_CARD_FILL = 0xd6c9b6;
@@ -310,6 +315,7 @@ export class Play extends Scene {
 				this.portraitBlockerPauseActive = true;
 				this.isPaused = true;
 				this.physics.pause();
+				this.setGameplayClockPaused(true);
 			} else if (
 				this.portraitBlockerPauseActive &&
 				!isPortraitBlockerActive()
@@ -397,6 +403,7 @@ export class Play extends Scene {
 			if (!this.pausePanel && !isPortraitBlockerActive()) {
 				this.isPaused = false;
 				this.physics.resume();
+				this.setGameplayClockPaused(false);
 			}
 			this.syncPortraitBlockerPause();
 			if (this.runEndedOnDeath) {
@@ -651,12 +658,11 @@ export class Play extends Scene {
 		startX: number,
 		level: { obstacles?: import('../util/types').ObstacleDef[] },
 	): boolean {
-		const touchHits = this.hazardXsInWindow(level, spawnX + 1, spawnX + TOUCH_HAZARD_WINDOW_PX);
-		const startHits = this.hazardXsInWindow(
-			level,
-			startX + 1,
-			startX + TOUCH_HAZARD_WINDOW_PX,
+		const windowPx = touchHazardWindowPx(
+			(this.player.sprite.body as Phaser.Physics.Arcade.Body).halfWidth,
 		);
+		const touchHits = this.hazardXsInWindow(level, spawnX + 1, spawnX + windowPx);
+		const startHits = this.hazardXsInWindow(level, startX + 1, startX + windowPx);
 		return touchHits.some((hx) => !startHits.includes(hx));
 	}
 
@@ -764,18 +770,45 @@ export class Play extends Scene {
 		this.livesText?.setVisible(visible);
 	}
 
+	qaWallClampEnabled = true;
+
 	private clampPlayerToWorldSides = () => {
+		if (!this.qaWallClampEnabled) return;
 		if (!this.player?.sprite?.body || this.player.isDead || this.isPaused) {
 			return;
 		}
 		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
-		this.player.clampBesidePlatforms(body);
 		this.player.clampHorizontalWorldBounds(body);
 	};
 
 	handleDisplayResize(): void {
 		this.touchControls?.relayout();
 		this.syncPortraitBlockerPause();
+		if (
+			isTouchDevice(this) &&
+			!isPortraitBlockerActive() &&
+			this.player &&
+			!this.player.isDead &&
+			!this.isResetting &&
+			this.touchControls?.visible
+		) {
+			const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
+			if (body.touching.down) {
+				const want = this.touchSpawnPosition();
+				if (Math.abs(this.player.sprite.x - want.x) > 4) {
+					this.player.setPosition(want.x, this.player.sprite.y);
+				}
+			}
+		}
+	}
+
+	private setGameplayClockPaused(paused: boolean): void {
+		this.time.paused = paused;
+		if (paused) {
+			this.tweens.pauseAll();
+		} else {
+			this.tweens.resumeAll();
+		}
 	}
 
 	private canResumeAfterPortraitBlocker(): boolean {
@@ -794,6 +827,7 @@ export class Play extends Scene {
 			this.isPaused = true;
 			if (!this.physics.world.isPaused) {
 				this.physics.pause();
+				this.setGameplayClockPaused(true);
 			}
 			return;
 		}
@@ -802,6 +836,7 @@ export class Play extends Scene {
 			this.portraitBlockerPauseActive = false;
 			this.isPaused = false;
 			this.physics.resume();
+			this.setGameplayClockPaused(false);
 			return;
 		}
 		if (!this.physics.world.isPaused) {
@@ -846,10 +881,15 @@ export class Play extends Scene {
 		this.portraitBlockerPauseActive = false;
 		this.isPaused = true;
 		this.physics.pause();
+		this.setGameplayClockPaused(true);
 		this.pausePanel = this.add.container(0, 0).setDepth(250);
 		const cx = this.cameras.main.width / 2;
 		const cy = this.cameras.main.height / 2;
-		const gap = 16;
+		const displayScale = Math.min(
+			this.scale.displaySize.width / 1920,
+			this.scale.displaySize.height / 1080,
+		);
+		const gap = Math.max(16, Math.ceil(10 / displayScale));
 		const bg = this.add
 			.rectangle(
 				cx,
@@ -929,6 +969,7 @@ export class Play extends Scene {
 		this.pausePanel = undefined;
 		this.isPaused = false;
 		this.physics.resume();
+		this.setGameplayClockPaused(false);
 		this.syncPortraitBlockerPause();
 	}
 

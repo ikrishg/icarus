@@ -38,6 +38,8 @@ const BASE_MARGIN_GAME_PX = 24;
 /** Modest gap past the ◀▶ cluster; spawn may overlap translucent buttons. */
 const PLAYER_SPAWN_PAD = 12;
 
+type HoldRole = 'left' | 'right' | 'jump' | 'dash' | 'shoot';
+
 export class TouchControls {
 	private scene: Scene;
 	private gameplayNodes: Phaser.GameObjects.GameObject[] = [];
@@ -64,8 +66,11 @@ export class TouchControls {
 		jump?: { x: number; y: number };
 	} = {};
 	private onPause?: () => void;
+	private readonly activeHolds = new Map<number, HoldRole>();
+	private readonly buttonHitAreas = new Map<HoldRole, Phaser.GameObjects.Rectangle>();
 	private readonly pointerReleaseHandlers: Array<{
 		pointerId: number | null;
+		role: HoldRole;
 		release: () => void;
 	}> = [];
 	private readonly onGlobalPointerRelease = (
@@ -77,13 +82,7 @@ export class TouchControls {
 				entry.release();
 			}
 		}
-	};
-	private readonly releaseAllInputs = () => {
-		this.state.left = false;
-		this.state.right = false;
-		this.state.jump = false;
-		this.state.shoot = false;
-		this.state.dash = false;
+		this.activeHolds.delete(pointer.id);
 	};
 
 	constructor(scene: Scene) {
@@ -99,6 +98,41 @@ export class TouchControls {
 
 	setTopBarHandlers(onPause: () => void, _onRestart: () => void): void {
 		this.onPause = onPause;
+	}
+
+	private setRoleDown(role: HoldRole, down: boolean): void {
+		switch (role) {
+			case 'left':
+				this.state.left = down;
+				break;
+			case 'right':
+				this.state.right = down;
+				break;
+			case 'jump':
+				this.state.jump = down;
+				break;
+			case 'dash':
+				this.state.dash = down;
+				break;
+			case 'shoot':
+				this.state.shoot = down;
+				break;
+		}
+	}
+
+	private pointerHitsRole(
+		pointer: Phaser.Input.Pointer,
+		role: HoldRole,
+	): boolean {
+		const area = this.buttonHitAreas.get(role);
+		if (!area?.active) return false;
+		const b = area.getBounds();
+		return (
+			pointer.x >= b.left &&
+			pointer.x <= b.right &&
+			pointer.y >= b.top &&
+			pointer.y <= b.bottom
+		);
 	}
 
 	/** Minimum player center X clearing only the left movement cluster (◀ ▶). */
@@ -172,8 +206,12 @@ export class TouchControls {
 	relayout(): void {
 		if (!this.visible) return;
 		const show = this.controlsShown;
-		this.releaseAllInputs();
+		const heldPointers = this.scene.input.manager.pointers
+			.filter((p) => p.isDown)
+			.map((p) => ({ id: p.id, pointer: p, role: this.activeHolds.get(p.id) }));
+
 		this.pointerReleaseHandlers.length = 0;
+		this.buttonHitAreas.clear();
 		for (const node of [...this.gameplayNodes, ...this.chromeNodes]) {
 			node.destroy();
 		}
@@ -183,8 +221,26 @@ export class TouchControls {
 		this.tapTargets.left = undefined;
 		this.tapTargets.right = undefined;
 		this.tapTargets.jump = undefined;
+
+		this.state.left = false;
+		this.state.right = false;
+		this.state.jump = false;
+		this.state.shoot = false;
+		this.state.dash = false;
+		this.activeHolds.clear();
+
 		this.build();
 		this.applyControlsVisible(show);
+
+		for (const { id, pointer, role } of heldPointers) {
+			if (!role) continue;
+			if (this.pointerHitsRole(pointer, role)) {
+				this.activeHolds.set(id, role);
+				this.setRoleDown(role, true);
+				const slot = this.pointerReleaseHandlers.find((h) => h.role === role);
+				if (slot) slot.pointerId = id;
+			}
+		}
 	}
 
 	private layoutMetrics() {
@@ -209,6 +265,7 @@ export class TouchControls {
 		y: number,
 		size: number,
 		label: string,
+		role: HoldRole,
 		onDown: () => void,
 		onUp: () => void,
 		options?: { leftCluster?: boolean; chrome?: boolean },
@@ -220,6 +277,8 @@ export class TouchControls {
 			.setScrollFactor(0)
 			.setDepth(201)
 			.setInteractive({ useHandCursor: false });
+		this.buttonHitAreas.set(role, bg);
+
 		const fontSize = Math.max(24, Math.floor(size * 0.32));
 		const text = this.scene.add
 			.text(x, y, label, {
@@ -232,20 +291,26 @@ export class TouchControls {
 			.setScrollFactor(0)
 			.setDepth(202);
 
-		const pointerSlot = { pointerId: null as number | null, release: onUp };
+		const pointerSlot = {
+			pointerId: null as number | null,
+			role,
+			release: onUp,
+		};
 		this.pointerReleaseHandlers.push(pointerSlot);
 		const releaseIfOwner = (pointer: Phaser.Input.Pointer) => {
 			if (pointerSlot.pointerId !== pointer.id) return;
 			pointerSlot.pointerId = null;
+			this.activeHolds.delete(pointer.id);
 			onUp();
 		};
 		bg.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
 			pointer.event?.preventDefault();
 			pointerSlot.pointerId = pointer.id;
+			this.activeHolds.set(pointer.id, role);
 			onDown();
 		});
 		bg.on('pointerup', releaseIfOwner);
-		bg.on('pointerout', releaseIfOwner);
+		bg.on('pointercancel', releaseIfOwner);
 
 		const bucket = chrome ? this.chromeNodes : this.gameplayNodes;
 		bucket.push(bg, text);
@@ -333,6 +398,7 @@ export class TouchControls {
 			baseY,
 			size,
 			'◀',
+			'left',
 			() => {
 				this.state.left = true;
 			},
@@ -348,6 +414,7 @@ export class TouchControls {
 			baseY,
 			size,
 			'▶',
+			'right',
 			() => {
 				this.state.right = true;
 			},
@@ -367,6 +434,7 @@ export class TouchControls {
 			topRowY,
 			size,
 			'↑',
+			'jump',
 			() => {
 				this.state.jump = true;
 			},
@@ -380,6 +448,7 @@ export class TouchControls {
 			topRowY,
 			size,
 			'Q',
+			'dash',
 			() => {
 				this.state.dash = true;
 			},
@@ -393,6 +462,7 @@ export class TouchControls {
 			baseY,
 			size,
 			'E',
+			'shoot',
 			() => {
 				this.state.shoot = true;
 			},
