@@ -524,7 +524,8 @@ async function runGroundDash(baseUrl) {
 		const p = play?.player;
 		if (!p) return;
 		const y = play.levelManager.current.start.y;
-		p.revive(520, y);
+		// Open ground lane on L1: dashing from 520 runs into spikes past ~1100.
+		p.revive(200, y);
 		p.sprite.setFlipX(false);
 		p.lastDashTime = 0;
 	});
@@ -537,14 +538,18 @@ async function runGroundDash(baseUrl) {
 			window.__icarusGame?.scene.getScene('Play')?.player?.isDashing === true,
 		{ timeout: 3000 },
 	);
-	for (let i = 0; i < 45; i++) {
+	await page.waitForFunction(
+		() =>
+			window.__icarusGame?.scene.getScene('Play')?.player?.isDashing === false,
+		{ timeout: dashMeta.duration + 800 },
+	);
+	await page.keyboard.up('KeyQ');
+	await page.keyboard.up('KeyD');
+	for (let i = 0; i < 4; i++) {
 		await page.evaluate(
 			() => new Promise((r) => requestAnimationFrame(r)),
 		);
 	}
-	await page.waitForTimeout(dashMeta.duration + 200);
-	await page.keyboard.up('KeyQ');
-	await page.keyboard.up('KeyD');
 	const endX = (await getPlayerPos(page)).x;
 	const delta = endX - startX;
 
