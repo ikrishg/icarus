@@ -2592,5 +2592,6 @@ async function main() {
 
 main().catch((err) => {
 	console.error(err);
+	console.log(JSON.stringify({ pass: false, fatal: String(err) }, null, 2));
 	process.exit(1);
 });
