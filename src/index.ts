@@ -7,6 +7,7 @@ declare global {
 		__icarusGame?: Game;
 		__icarusGetColliders?: () => number;
 		__icarusGetLives?: () => number;
+		__icarusPrepareLevel?: (levelIndex: number) => boolean;
 	}
 }
 

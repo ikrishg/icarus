@@ -63,7 +63,6 @@ export class Player {
 		body.setSize(24, 44);
 		body.setOffset(15, 12);
 		body.setCollideWorldBounds(true);
-		body.checkCollision.up = false;
 
 		// Setup keyboard controls
 		this.cursors = this.scene.input.keyboard?.createCursorKeys();
@@ -139,33 +138,21 @@ export class Player {
 		const rightDown =
 			this.cursors?.right.isDown || this.wasd?.right.isDown || touch?.right;
 
-		// Horizontal movement (do not set velocity into a wall; poststep fixes true overshoot)
+		// Horizontal movement (world edges only; poststep fixes overshoot — not platform blocked.*)
 		if (leftDown && canMoveLeft && body.center.x > minCenter) {
 			this.sprite.setVelocityX(-moveSpeed);
-			this.sprite.setFlipX(true); // Flip sprite to face left
+			this.sprite.setFlipX(true);
 		} else if (rightDown && body.center.x < maxCenter) {
 			this.sprite.setVelocityX(moveSpeed);
-			this.sprite.setFlipX(false); // Face right
+			this.sprite.setFlipX(false);
 		} else {
 			this.sprite.setVelocityX(0);
 		}
-		if (body.blocked.left || body.center.x <= minCenter) {
-			if (body.velocity.x < 0) {
-				body.velocity.x = 0;
-			}
-			if (leftDown && canMoveLeft) {
-				this.sprite.x = minCenter;
-				body.updateFromGameObject();
-			}
+		if (body.center.x <= minCenter && body.velocity.x < 0) {
+			body.velocity.x = 0;
 		}
-		if (body.blocked.right || body.center.x >= maxCenter) {
-			if (body.velocity.x > 0) {
-				body.velocity.x = 0;
-			}
-			if (rightDown) {
-				this.sprite.x = maxCenter;
-				body.updateFromGameObject();
-			}
+		if (body.center.x >= maxCenter && body.velocity.x > 0) {
+			body.velocity.x = 0;
 		}
 
 		// Jumping (with ability-based max jumps)

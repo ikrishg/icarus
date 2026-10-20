@@ -35,9 +35,8 @@ export function isTouchDevice(scene?: Scene): boolean {
 const MIN_TOUCH_CSS_PX = 44;
 const BASE_BTN_GAME_PX = 88;
 const BASE_MARGIN_GAME_PX = 24;
-const PLAYER_SPAWN_PAD = 40;
-/** Arcade body half-width at scale 3 (setSize 24×44). */
-const PLAYER_SPAWN_HALF_WIDTH = 40;
+/** Modest gap past the ◀▶ cluster; spawn may overlap translucent buttons. */
+const PLAYER_SPAWN_PAD = 12;
 
 export class TouchControls {
 	private scene: Scene;
@@ -60,10 +59,18 @@ export class TouchControls {
 	private controlsShown = true;
 	visible = false;
 	readonly tapTargets: {
+		left?: { x: number; y: number };
 		right?: { x: number; y: number };
 		jump?: { x: number; y: number };
 	} = {};
 	private onPause?: () => void;
+	private readonly releaseAllInputs = () => {
+		this.state.left = false;
+		this.state.right = false;
+		this.state.jump = false;
+		this.state.shoot = false;
+		this.state.dash = false;
+	};
 
 	constructor(scene: Scene) {
 		this.scene = scene;
@@ -71,6 +78,8 @@ export class TouchControls {
 			return;
 		}
 		this.visible = true;
+		this.scene.input.on('pointerup', this.releaseAllInputs);
+		this.scene.input.on('pointercancel', this.releaseAllInputs);
 		this.build();
 	}
 
@@ -79,7 +88,7 @@ export class TouchControls {
 	}
 
 	/** Minimum player center X clearing only the left movement cluster (◀ ▶). */
-	getMinSpawnX(): number {
+	getMinSpawnX(bodyHalfWidth = 0): number {
 		if (!this.visible) return 0;
 		let clusterRight = 0;
 		for (const node of this.leftMovementNodes) {
@@ -97,7 +106,7 @@ export class TouchControls {
 			const rightX = leftX + size + gap;
 			clusterRight = rightX + size / 2;
 		}
-		return clusterRight + PLAYER_SPAWN_PAD + PLAYER_SPAWN_HALF_WIDTH;
+		return clusterRight + PLAYER_SPAWN_PAD + bodyHalfWidth;
 	}
 
 	getLeftMovementButtonBounds(): Array<{
@@ -160,28 +169,18 @@ export class TouchControls {
 
 	relayout(): void {
 		if (!this.visible) return;
-		const held = {
-			left: this.state.left,
-			right: this.state.right,
-			jump: this.state.jump,
-			shoot: this.state.shoot,
-			dash: this.state.dash,
-		};
 		const show = this.controlsShown;
+		this.releaseAllInputs();
 		for (const node of [...this.gameplayNodes, ...this.chromeNodes]) {
 			node.destroy();
 		}
 		this.gameplayNodes = [];
 		this.leftMovementNodes = [];
 		this.chromeNodes = [];
+		this.tapTargets.left = undefined;
 		this.tapTargets.right = undefined;
 		this.tapTargets.jump = undefined;
 		this.build();
-		this.state.left = held.left;
-		this.state.right = held.right;
-		this.state.jump = held.jump;
-		this.state.shoot = held.shoot;
-		this.state.dash = held.dash;
 		this.applyControlsVisible(show);
 	}
 
@@ -317,6 +316,7 @@ export class TouchControls {
 		const leftX = margin + size / 2;
 		const rightX = leftX + size + gap;
 
+		this.tapTargets.left = { x: leftX, y: baseY };
 		this.makeButton(
 			leftX,
 			baseY,
@@ -346,12 +346,14 @@ export class TouchControls {
 			{ leftCluster: true },
 		);
 
-		const jumpX = WIDTH - margin - size / 2;
-		const jumpY = baseY - size * 4.25 - gap * 3;
-		this.tapTargets.jump = { x: jumpX, y: jumpY };
+		const rightCol = WIDTH - margin - size / 2;
+		const leftCol = rightCol - size - gap;
+		const topRowY = baseY - size - gap;
+
+		this.tapTargets.jump = { x: leftCol, y: topRowY };
 		this.makeButton(
-			jumpX,
-			jumpY,
+			leftCol,
+			topRowY,
 			size,
 			'↑',
 			() => {
@@ -363,7 +365,20 @@ export class TouchControls {
 		);
 
 		this.makeButton(
-			WIDTH - margin - size / 2,
+			rightCol,
+			topRowY,
+			size,
+			'Q',
+			() => {
+				this.state.dash = true;
+			},
+			() => {
+				this.state.dash = false;
+			},
+		);
+
+		this.makeButton(
+			rightCol,
 			baseY,
 			size,
 			'E',
@@ -372,19 +387,6 @@ export class TouchControls {
 			},
 			() => {
 				this.state.shoot = false;
-			},
-		);
-
-		this.makeButton(
-			WIDTH - margin - size / 2,
-			baseY - size - gap,
-			size,
-			'Q',
-			() => {
-				this.state.dash = true;
-			},
-			() => {
-				this.state.dash = false;
 			},
 		);
 
@@ -440,6 +442,8 @@ export class TouchControls {
 	}
 
 	destroy() {
+		this.scene.input.off('pointerup', this.releaseAllInputs);
+		this.scene.input.off('pointercancel', this.releaseAllInputs);
 		for (const node of [...this.gameplayNodes, ...this.chromeNodes]) {
 			node.destroy();
 		}

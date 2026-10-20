@@ -5,7 +5,12 @@ import { LevelManager } from '../components/LevelManager';
 import { Player } from '../components/Player';
 import { isTouchDevice, TouchControls } from '../components/TouchControls';
 import type { PlayerAbilities } from '../util/types';
-import { DEPTH_PLAY_HUD_TEXT, PLAY_HUD_CLEARANCE_Y } from '../util/constants';
+import {
+	DEPTH_PLAY_HUD_TEXT,
+	HEIGHT,
+	PLAY_HUD_CLEARANCE_Y,
+	WIDTH,
+} from '../util/constants';
 import { DeathSequence, type DeathCause } from '../components/DeathSequence';
 import { isDebugPlayEnabled } from '../util/debug';
 import {
@@ -22,7 +27,8 @@ import {
 } from '../util/portraitBlocker';
 import { touchChromeMetrics } from '../util/touchLayout';
 
-const TOUCH_SPAWN_MAX_DELTA_FROM_START = 200;
+/** Max touch spawn offset from authored start (buttons are translucent). */
+const TOUCH_SPAWN_MAX_DELTA_FROM_START = 72;
 import { sanitizePixelFont } from '../util/text';
 
 const ABILITY_CARD_FILL = 0xd6c9b6;
@@ -165,12 +171,8 @@ export class Play extends Scene {
 				}
 			},
 		);
-		const spawn = this.levelManager.current.start;
-		const spawnMinX = this.touchControls.getMinSpawnX();
-		if (spawn.x < spawnMinX) {
-			this.player.setPosition(spawnMinX, spawn.y);
-		}
-
+		this.physics.world.setBounds(0, 0, WIDTH, HEIGHT);
+		this.physics.world.setBoundsCollision(true, true, false, true);
 		this.physics.world.on('poststep', this.clampPlayerToWorldSides, this);
 
 		// Create vision overlay
@@ -187,10 +189,42 @@ export class Play extends Scene {
 			.setAlpha(this.abilityManager.getVisionAlpha());
 
 		this.setupLevelColliders();
+		const spawn = this.touchSpawnPosition();
+		this.player.setPosition(spawn.x, spawn.y);
 		this.deathSequence = new DeathSequence(this, this.player);
 		this.createLivesHud();
 		window.__icarusGetColliders = () => this.colliders.length;
 		window.__icarusGetLives = () => this.lives;
+		window.__icarusPrepareLevel = (levelIndex: number) => {
+			try {
+				if (!this.scene?.isActive() || !this.player || !this.physics?.world) {
+					return false;
+				}
+				const world = this.physics.world;
+				const wasPaused = world.isPaused;
+				if (!wasPaused) {
+					world.pause();
+				}
+				try {
+					this.clearLevelInstruction();
+					this.clearColliders();
+					this.isResetting = false;
+					this.player.isDead = false;
+					this.player.controlsEnabled = true;
+					this.levelManager.goto(levelIndex);
+					const spawn = this.touchSpawnPosition();
+					this.player.revive(spawn.x, spawn.y);
+					this.setupLevelColliders();
+					return true;
+				} finally {
+					if (!wasPaused) {
+						world.resume();
+					}
+				}
+			} catch {
+				return false;
+			}
+		};
 		this.playBattleMusic();
 		this.showLevelInstruction();
 
@@ -262,6 +296,7 @@ export class Play extends Scene {
 		}
 		delete window.__icarusGetColliders;
 		delete window.__icarusGetLives;
+		delete window.__icarusPrepareLevel;
 	}
 
 	update() {
@@ -396,8 +431,8 @@ export class Play extends Scene {
 		this.clearLevelInstruction();
 		this.clearColliders();
 		this.levelManager.goto(levelIndex);
-		const startPos = this.levelManager.current.start;
-		this.player.revive(this.touchSpawnX(startPos.x), startPos.y);
+		const spawnPos = this.touchSpawnPosition();
+		this.player.revive(spawnPos.x, spawnPos.y);
 		this.setupLevelColliders();
 		this.showLevelInstruction();
 		this.playBattleMusic();
@@ -560,23 +595,67 @@ export class Play extends Scene {
 		}
 	}
 
-	private touchSpawnX(startX: number): number {
-		if (!this.touchControls?.visible) return startX;
-		const clusterMin = this.touchControls.getMinSpawnX();
-		const floor = Math.max(startX, clusterMin);
-		const cap = startX + TOUCH_SPAWN_MAX_DELTA_FROM_START;
-		if (clusterMin > cap) {
-			return floor;
+	private touchSpawnBlockedAt(x: number, y: number): boolean {
+		const prevX = this.player.sprite.x;
+		const prevY = this.player.sprite.y;
+		this.player.sprite.setPosition(x, y);
+		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
+		body.updateFromGameObject();
+		let blocked = false;
+		for (const child of this.levelManager.platforms.getChildren()) {
+			const platBody = (child as Phaser.GameObjects.GameObject).body as
+				| Phaser.Physics.Arcade.StaticBody
+				| undefined;
+			if (!platBody || platBody.width >= 1800) continue;
+			if (this.physics.overlap(this.player.sprite, child)) {
+				blocked = true;
+				break;
+			}
 		}
-		return Math.min(floor, cap);
+		if (!blocked) {
+			for (const child of this.levelManager.hazards.getChildren()) {
+				if (this.physics.overlap(this.player.sprite, child)) {
+					blocked = true;
+					break;
+				}
+			}
+		}
+		this.player.sprite.setPosition(prevX, prevY);
+		body.updateFromGameObject();
+		return blocked;
+	}
+
+	private touchSpawnPosition(): { x: number; y: number } {
+		const start = this.levelManager.current.start;
+		if (!this.touchControls?.visible) {
+			return { x: start.x, y: start.y };
+		}
+		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
+		const clusterMin = this.touchControls.getMinSpawnX(body.halfWidth);
+		const maxX = Math.max(
+			start.x + TOUCH_SPAWN_MAX_DELTA_FROM_START,
+			clusterMin,
+		);
+		let x = Math.max(start.x, clusterMin);
+		while (x <= maxX && this.touchSpawnBlockedAt(x, start.y)) {
+			x += 8;
+		}
+		if (x < clusterMin) {
+			x = clusterMin;
+			while (x <= maxX && this.touchSpawnBlockedAt(x, start.y)) {
+				x += 8;
+			}
+		}
+		x = Math.min(Math.max(x, clusterMin), maxX);
+		return { x, y: start.y };
 	}
 
 	resetPlayer() {
 		if (!this.player) return;
 		this.clearLevelInstruction();
 		this.clearColliders();
-		const startPos = this.levelManager.current.start;
-		this.player.revive(this.touchSpawnX(startPos.x), startPos.y);
+		const spawnPos = this.touchSpawnPosition();
+		this.player.revive(spawnPos.x, spawnPos.y);
 		this.setupLevelColliders();
 		this.syncPortraitBlockerPause();
 	}
@@ -685,14 +764,15 @@ export class Play extends Scene {
 				0.75,
 			)
 			.setInteractive();
+		const titleY = isTouchDevice(this) ? cy - 155 : cy - 120;
 		const title = this.add
-			.text(cx, cy - 110, 'Paused', {
+			.text(cx, titleY, 'Paused', {
 				fontFamily: 'Pixelify Sans',
 				fontSize: '72px',
 				color: '#ffdd00',
 			})
 			.setOrigin(0.5);
-		const resumeY = isTouchDevice(this) ? cy - 70 : cy - 10;
+		const resumeY = isTouchDevice(this) ? cy - 55 : cy + 15;
 		const resumeBtn = this.add
 			.text(cx, resumeY, 'Resume', {
 				fontFamily: 'Pixelify Sans',
@@ -727,7 +807,7 @@ export class Play extends Scene {
 		];
 		if (isTouchDevice(this)) {
 			const restartBtn = this.add
-				.text(cx, cy + 25, 'Restart level', {
+				.text(cx, cy + 85, 'Restart level', {
 					fontFamily: 'Pixelify Sans',
 					fontSize: '44px',
 					color: PALETTE_HEX.cloudWhite,
