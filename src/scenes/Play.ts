@@ -772,7 +772,7 @@ export class Play extends Scene {
 				color: '#ffdd00',
 			})
 			.setOrigin(0.5);
-		const resumeY = isTouchDevice(this) ? cy - 55 : cy + 15;
+		const resumeY = isTouchDevice(this) ? cy - 65 : cy + 15;
 		const resumeBtn = this.add
 			.text(cx, resumeY, 'Resume', {
 				fontFamily: 'Pixelify Sans',
@@ -807,7 +807,7 @@ export class Play extends Scene {
 		];
 		if (isTouchDevice(this)) {
 			const restartBtn = this.add
-				.text(cx, cy + 100, 'Restart level', {
+				.text(cx, cy + 115, 'Restart level', {
 					fontFamily: 'Pixelify Sans',
 					fontSize: '44px',
 					color: PALETTE_HEX.cloudWhite,

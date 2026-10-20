@@ -78,8 +78,6 @@ export class TouchControls {
 			return;
 		}
 		this.visible = true;
-		this.scene.input.on('pointerup', this.releaseAllInputs);
-		this.scene.input.on('pointercancel', this.releaseAllInputs);
 		this.build();
 	}
 

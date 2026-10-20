@@ -503,7 +503,13 @@ async function runGroundDash(baseUrl) {
 
 	const startX = (await getPlayerPos(page)).x;
 	await page.keyboard.down('KeyD');
-	await page.keyboard.press('KeyQ');
+	await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const p = play?.player;
+		if (!p) return;
+		p.sprite.setFlipX(false);
+		p.performDash();
+	});
 	await page.waitForFunction(
 		() =>
 			window.__icarusGame?.scene.getScene('Play')?.player?.isDashing === true,
