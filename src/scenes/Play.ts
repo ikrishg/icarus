@@ -807,7 +807,7 @@ export class Play extends Scene {
 		];
 		if (isTouchDevice(this)) {
 			const restartBtn = this.add
-				.text(cx, cy + 85, 'Restart level', {
+				.text(cx, cy + 100, 'Restart level', {
 					fontFamily: 'Pixelify Sans',
 					fontSize: '44px',
 					color: PALETTE_HEX.cloudWhite,

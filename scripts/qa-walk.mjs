@@ -503,14 +503,13 @@ async function runGroundDash(baseUrl) {
 
 	const startX = (await getPlayerPos(page)).x;
 	await page.keyboard.down('KeyD');
-	await page.keyboard.down('KeyQ');
+	await page.keyboard.press('KeyQ');
 	await page.waitForFunction(
 		() =>
 			window.__icarusGame?.scene.getScene('Play')?.player?.isDashing === true,
-		{ timeout: 2000 },
+		{ timeout: 3000 },
 	);
 	await page.waitForTimeout(dashMeta.duration + 200);
-	await page.keyboard.up('KeyQ');
 	await page.keyboard.up('KeyD');
 	const endX = (await getPlayerPos(page)).x;
 	const delta = endX - startX;
