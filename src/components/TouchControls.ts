@@ -64,6 +64,20 @@ export class TouchControls {
 		jump?: { x: number; y: number };
 	} = {};
 	private onPause?: () => void;
+	private readonly pointerReleaseHandlers: Array<{
+		pointerId: number | null;
+		release: () => void;
+	}> = [];
+	private readonly onGlobalPointerRelease = (
+		pointer: Phaser.Input.Pointer,
+	) => {
+		for (const entry of this.pointerReleaseHandlers) {
+			if (entry.pointerId === pointer.id) {
+				entry.pointerId = null;
+				entry.release();
+			}
+		}
+	};
 	private readonly releaseAllInputs = () => {
 		this.state.left = false;
 		this.state.right = false;
@@ -78,6 +92,8 @@ export class TouchControls {
 			return;
 		}
 		this.visible = true;
+		this.scene.input.on('pointerup', this.onGlobalPointerRelease);
+		this.scene.input.on('pointercancel', this.onGlobalPointerRelease);
 		this.build();
 	}
 
@@ -88,22 +104,10 @@ export class TouchControls {
 	/** Minimum player center X clearing only the left movement cluster (◀ ▶). */
 	getMinSpawnX(bodyHalfWidth = 0): number {
 		if (!this.visible) return 0;
-		let clusterRight = 0;
-		for (const node of this.leftMovementNodes) {
-			if (!node.active || !('getBounds' in node)) continue;
-			const b = (
-				node as Phaser.GameObjects.GameObject & {
-					getBounds: () => Phaser.Geom.Rectangle;
-				}
-			).getBounds();
-			clusterRight = Math.max(clusterRight, b.right);
-		}
-		if (clusterRight <= 0) {
-			const { size, margin, gap } = this.layoutMetrics();
-			const leftX = margin + size / 2;
-			const rightX = leftX + size + gap;
-			clusterRight = rightX + size / 2;
-		}
+		const { size, margin, gap } = this.layoutMetrics();
+		const leftX = margin + size / 2;
+		const rightX = leftX + size + gap;
+		const clusterRight = rightX + size / 2;
 		return clusterRight + PLAYER_SPAWN_PAD + bodyHalfWidth;
 	}
 
@@ -169,6 +173,7 @@ export class TouchControls {
 		if (!this.visible) return;
 		const show = this.controlsShown;
 		this.releaseAllInputs();
+		this.pointerReleaseHandlers.length = 0;
 		for (const node of [...this.gameplayNodes, ...this.chromeNodes]) {
 			node.destroy();
 		}
@@ -227,12 +232,20 @@ export class TouchControls {
 			.setScrollFactor(0)
 			.setDepth(202);
 
+		const pointerSlot = { pointerId: null as number | null, release: onUp };
+		this.pointerReleaseHandlers.push(pointerSlot);
+		const releaseIfOwner = (pointer: Phaser.Input.Pointer) => {
+			if (pointerSlot.pointerId !== pointer.id) return;
+			pointerSlot.pointerId = null;
+			onUp();
+		};
 		bg.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
 			pointer.event?.preventDefault();
+			pointerSlot.pointerId = pointer.id;
 			onDown();
 		});
-		bg.on('pointerup', onUp);
-		bg.on('pointerout', onUp);
+		bg.on('pointerup', releaseIfOwner);
+		bg.on('pointerout', releaseIfOwner);
 
 		const bucket = chrome ? this.chromeNodes : this.gameplayNodes;
 		bucket.push(bg, text);
@@ -440,8 +453,8 @@ export class TouchControls {
 	}
 
 	destroy() {
-		this.scene.input.off('pointerup', this.releaseAllInputs);
-		this.scene.input.off('pointercancel', this.releaseAllInputs);
+		this.scene.input.off('pointerup', this.onGlobalPointerRelease);
+		this.scene.input.off('pointercancel', this.onGlobalPointerRelease);
 		for (const node of [...this.gameplayNodes, ...this.chromeNodes]) {
 			node.destroy();
 		}

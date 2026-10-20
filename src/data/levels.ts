@@ -96,7 +96,7 @@ export const LEVELS: LevelDefinition[] = [
 			{ type: 'platform', x: 720, y: 700, w: 220, h: 40 },
 			{ type: 'platform', x: 1020, y: 580, w: 240, h: 40 },
 			{ type: 'platform', x: 1320, y: 460, w: 260, h: 40 },
-			{ type: 'fireball', x: 600, y: 0, delay: 1000, interval: 1800 },
+			{ type: 'fireball', x: 1100, y: 0, delay: 1000, interval: 1800 },
 		],
 		isLoseLevel: true,
 	},
@@ -121,7 +121,7 @@ export const LEVELS: LevelDefinition[] = [
 		obstacles: [
 			ground,
 			{ type: 'platform', x: 400, y: 790, w: 250, h: 40 },
-			{ type: 'spikes', x: 550, y: 1000, count: 8, size: 48 },
+			{ type: 'spikes', x: 780, y: 1000, count: 8, size: 48 },
 			{ type: 'platform', x: 850, y: 660, w: 280, h: 40 },
 			{ type: 'spikes', x: 1000, y: 1000, count: 6, size: 48 },
 			{ type: 'platform', x: 1250, y: 520, w: 300, h: 40 },

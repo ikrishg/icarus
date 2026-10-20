@@ -29,6 +29,7 @@ import { touchChromeMetrics } from '../util/touchLayout';
 
 /** Max touch spawn offset from authored start (buttons are translucent). */
 const TOUCH_SPAWN_MAX_DELTA_FROM_START = 72;
+const TOUCH_HAZARD_WINDOW_PX = 250;
 import { sanitizePixelFont } from '../util/text';
 
 const ABILITY_CARD_FILL = 0xd6c9b6;
@@ -300,12 +301,21 @@ export class Play extends Scene {
 	}
 
 	update() {
-		if (
-			isTouchDevice(this) &&
-			this.portraitBlockerPauseActive &&
-			!isPortraitBlockerActive()
-		) {
-			this.syncPortraitBlockerPause();
+		if (isTouchDevice(this)) {
+			if (
+				isPortraitBlockerActive() &&
+				!this.pausePanel &&
+				!this.physics.world.isPaused
+			) {
+				this.portraitBlockerPauseActive = true;
+				this.isPaused = true;
+				this.physics.pause();
+			} else if (
+				this.portraitBlockerPauseActive &&
+				!isPortraitBlockerActive()
+			) {
+				this.syncPortraitBlockerPause();
+			}
 		}
 		if (this.isPaused) return;
 		if (this.deathSequence?.consumeJumpBuffer()) {
@@ -595,6 +605,61 @@ export class Play extends Scene {
 		}
 	}
 
+	private hazardXsInWindow(
+		level: { obstacles?: import('../util/types').ObstacleDef[] },
+		minX: number,
+		maxX: number,
+	): number[] {
+		const hits: number[] = [];
+		for (const o of level.obstacles ?? []) {
+			if (o.type === 'fireball' && o.x >= minX && o.x <= maxX) {
+				hits.push(o.x);
+			}
+			if (o.type === 'spikes') {
+				const scale = o.size / 129;
+				const w = 402 * scale;
+				for (let i = 0; i < o.count; i++) {
+					const sx = o.x + i * w;
+					if (sx >= minX && sx <= maxX) hits.push(sx);
+				}
+			}
+		}
+		return hits;
+	}
+
+	private touchSpawnOverlapsCluster(x: number, y: number): boolean {
+		if (!this.touchControls?.visible) return false;
+		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
+		const playerRect = {
+			left: x - body.halfWidth,
+			right: x + body.halfWidth,
+			top: y - body.halfHeight,
+			bottom: y + body.halfHeight,
+		};
+		const buttons = this.touchControls.getLeftMovementButtonBounds?.() ?? [];
+		return buttons.some(
+			(b) =>
+				playerRect.left < b.right - 0.5 &&
+				playerRect.right > b.left + 0.5 &&
+				playerRect.top < b.bottom &&
+				playerRect.bottom > b.top,
+		);
+	}
+
+	private touchSpawnHazardExclusive(
+		spawnX: number,
+		startX: number,
+		level: { obstacles?: import('../util/types').ObstacleDef[] },
+	): boolean {
+		const touchHits = this.hazardXsInWindow(level, spawnX + 1, spawnX + TOUCH_HAZARD_WINDOW_PX);
+		const startHits = this.hazardXsInWindow(
+			level,
+			startX + 1,
+			startX + TOUCH_HAZARD_WINDOW_PX,
+		);
+		return touchHits.some((hx) => !startHits.includes(hx));
+	}
+
 	private touchSpawnBlockedAt(x: number, y: number): boolean {
 		const prevX = this.player.sprite.x;
 		const prevY = this.player.sprite.y;
@@ -612,14 +677,6 @@ export class Play extends Scene {
 				break;
 			}
 		}
-		if (!blocked) {
-			for (const child of this.levelManager.hazards.getChildren()) {
-				if (this.physics.overlap(this.player.sprite, child)) {
-					blocked = true;
-					break;
-				}
-			}
-		}
 		this.player.sprite.setPosition(prevX, prevY);
 		body.updateFromGameObject();
 		return blocked;
@@ -634,19 +691,36 @@ export class Play extends Scene {
 		const clusterMin = this.touchControls.getMinSpawnX(body.halfWidth);
 		const maxX = Math.max(
 			start.x + TOUCH_SPAWN_MAX_DELTA_FROM_START,
-			clusterMin,
+			clusterMin + TOUCH_SPAWN_MAX_DELTA_FROM_START,
 		);
-		let x = Math.max(start.x, clusterMin);
-		while (x <= maxX && this.touchSpawnBlockedAt(x, start.y)) {
-			x += 8;
-		}
-		if (x < clusterMin) {
-			x = clusterMin;
-			while (x <= maxX && this.touchSpawnBlockedAt(x, start.y)) {
-				x += 8;
+		const level = this.levelManager.current;
+		const hazardOk = (tx: number) =>
+			!this.touchSpawnHazardExclusive(tx, start.x, level);
+		const ledgeOk = (tx: number) => !this.touchSpawnBlockedAt(tx, start.y);
+		const clusterOk = (tx: number) =>
+			!this.touchSpawnOverlapsCluster(tx, start.y);
+		const candidates: number[] = [];
+		for (let tx = start.x; tx <= maxX; tx += 8) {
+			if (hazardOk(tx) && ledgeOk(tx)) {
+				candidates.push(tx);
 			}
 		}
-		x = Math.min(Math.max(x, clusterMin), maxX);
+		let x = start.x;
+		if (candidates.length > 0) {
+			const clusterSafe = candidates.filter(
+				(tx) => tx >= clusterMin && clusterOk(tx),
+			);
+			if (clusterSafe.length > 0) {
+				x = clusterSafe[clusterSafe.length - 1];
+			} else {
+				const pastCluster = candidates.filter((tx) => tx >= clusterMin);
+				if (pastCluster.length > 0) {
+					x = pastCluster[pastCluster.length - 1];
+				} else {
+					x = candidates[candidates.length - 1];
+				}
+			}
+		}
 		return { x, y: start.y };
 	}
 
@@ -694,9 +768,9 @@ export class Play extends Scene {
 		if (!this.player?.sprite?.body || this.player.isDead || this.isPaused) {
 			return;
 		}
-		this.player.clampHorizontalWorldBounds(
-			this.player.sprite.body as Phaser.Physics.Arcade.Body,
-		);
+		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
+		this.player.clampBesidePlatforms(body);
+		this.player.clampHorizontalWorldBounds(body);
 	};
 
 	handleDisplayResize(): void {
@@ -716,10 +790,9 @@ export class Play extends Scene {
 		if (!isTouchDevice(this)) return;
 		if (isPortraitBlockerActive()) {
 			if (this.pausePanel) return;
-			if (this.portraitBlockerPauseActive) return;
 			this.portraitBlockerPauseActive = true;
-			if (!this.isPaused) {
-				this.isPaused = true;
+			this.isPaused = true;
+			if (!this.physics.world.isPaused) {
 				this.physics.pause();
 			}
 			return;
@@ -747,6 +820,28 @@ export class Play extends Scene {
 		this.togglePause();
 	}
 
+	private stackPauseMenuButton(
+		cx: number,
+		belowBottom: number,
+		label: string,
+		gap: number,
+		onTap: () => void,
+	): { btn: Phaser.GameObjects.Text; bottom: number } {
+		const btn = this.add
+			.text(cx, belowBottom + gap, label, {
+				fontFamily: 'Pixelify Sans',
+				fontSize: '44px',
+				color: PALETTE_HEX.cloudWhite,
+				backgroundColor: PALETTE_HEX.deep,
+				padding: { x: 28, y: 14 },
+			})
+			.setOrigin(0.5, 0)
+			.setInteractive({ useHandCursor: true });
+		btn.on('pointerdown', onTap);
+		const b = btn.getBounds();
+		return { btn, bottom: b.bottom };
+	}
+
 	togglePause() {
 		this.portraitBlockerPauseActive = false;
 		this.isPaused = true;
@@ -754,6 +849,7 @@ export class Play extends Scene {
 		this.pausePanel = this.add.container(0, 0).setDepth(250);
 		const cx = this.cameras.main.width / 2;
 		const cy = this.cameras.main.height / 2;
+		const gap = 16;
 		const bg = this.add
 			.rectangle(
 				cx,
@@ -764,77 +860,54 @@ export class Play extends Scene {
 				0.75,
 			)
 			.setInteractive();
-		const titleY = isTouchDevice(this) ? cy - 155 : cy - 120;
 		const title = this.add
-			.text(cx, titleY, 'Paused', {
+			.text(cx, cy - 200, 'Paused', {
 				fontFamily: 'Pixelify Sans',
 				fontSize: '72px',
 				color: '#ffdd00',
 			})
-			.setOrigin(0.5);
-		const resumeY = isTouchDevice(this) ? cy - 65 : cy + 15;
-		const resumeBtn = this.add
-			.text(cx, resumeY, 'Resume', {
-				fontFamily: 'Pixelify Sans',
-				fontSize: '44px',
-				color: PALETTE_HEX.cloudWhite,
-				backgroundColor: PALETTE_HEX.deep,
-				padding: { x: 28, y: 14 },
-			})
-			.setOrigin(0.5)
-			.setInteractive({ useHandCursor: true });
-		resumeBtn.on('pointerdown', () => this.closePause());
-		const quitY = isTouchDevice(this) ? cy + 120 : cy + 80;
-		const quitBtn = this.add
-			.text(cx, quitY, 'Quit to menu', {
-				fontFamily: 'Pixelify Sans',
-				fontSize: '44px',
-				color: PALETTE_HEX.cloudWhite,
-				backgroundColor: PALETTE_HEX.deep,
-				padding: { x: 28, y: 14 },
-			})
-			.setOrigin(0.5)
-			.setInteractive({ useHandCursor: true });
-		quitBtn.on('pointerdown', () => {
+			.setOrigin(0.5, 0);
+		let cursorBottom = title.getBounds().bottom;
+		const resume = this.stackPauseMenuButton(cx, cursorBottom, 'Resume', gap, () =>
+			this.closePause(),
+		);
+		cursorBottom = resume.bottom;
+		const pauseChildren: Phaser.GameObjects.GameObject[] = [
+			bg,
+			title,
+			resume.btn,
+		];
+		if (isTouchDevice(this)) {
+			const restart = this.stackPauseMenuButton(
+				cx,
+				cursorBottom,
+				'Restart level',
+				gap,
+				() => {
+					this.closePause();
+					if (!this.isResetting) {
+						this.killPlayer('fall', { fast: true, spendLife: false });
+					}
+				},
+			);
+			cursorBottom = restart.bottom;
+			pauseChildren.push(restart.btn);
+		}
+		const quit = this.stackPauseMenuButton(cx, cursorBottom, 'Quit to menu', gap, () => {
 			this.closePause();
 			this.sound.stopAll();
 			this.scene.start('Menu');
 		});
-		const pauseChildren: Phaser.GameObjects.GameObject[] = [
-			bg,
-			title,
-			resumeBtn,
-		];
-		if (isTouchDevice(this)) {
-			const restartBtn = this.add
-				.text(cx, cy + 115, 'Restart level', {
-					fontFamily: 'Pixelify Sans',
-					fontSize: '44px',
-					color: PALETTE_HEX.cloudWhite,
-					backgroundColor: PALETTE_HEX.deep,
-					padding: { x: 28, y: 14 },
-				})
-				.setOrigin(0.5)
-				.setInteractive({ useHandCursor: true });
-			restartBtn.on('pointerdown', () => {
-				this.closePause();
-				if (!this.isResetting) {
-					this.killPlayer('fall', { fast: true, spendLife: false });
-				}
-			});
-			restartBtn.setY(cy + 25);
-			quitBtn.setY(cy + 120);
-			pauseChildren.push(restartBtn);
-		}
-		pauseChildren.push(quitBtn);
+		cursorBottom = quit.bottom;
+		pauseChildren.push(quit.btn);
 		if (!isTouchDevice(this)) {
 			const hint = this.add
-				.text(cx, cy + 175, 'Esc: Resume   |   Q: Quit to menu', {
+				.text(cx, cursorBottom + gap, 'Esc: Resume   |   Q: Quit to menu', {
 					fontFamily: 'Pixelify Sans',
 					fontSize: '32px',
 					color: '#fdfdfe',
 				})
-				.setOrigin(0.5);
+				.setOrigin(0.5, 0);
 			pauseChildren.push(hint);
 		}
 		this.pausePanel.add(pauseChildren);
