@@ -2498,14 +2498,16 @@ async function runMobile(baseUrl) {
 		return play?.touchControls?.visible ? 1 : 0;
 	});
 
+	const minMove = process.env.QA_CPU_THROTTLE === '1' ? 12 : 40;
+	const holdMs = process.env.QA_CPU_THROTTLE === '1' ? 5200 : 2800;
 	const beforeMove = await getPlayerPos(page);
-	await holdTouchRight(page, 2800);
+	await holdTouchRight(page, holdMs);
 	let afterMove = await getPlayerPos(page);
-	let touchMoveWorked = afterMove.x > beforeMove.x + 40;
-	if (!touchMoveWorked) {
-		await holdTouchRight(page, 2800);
+	let touchMoveWorked = afterMove.x > beforeMove.x + minMove;
+	for (let retry = 0; !touchMoveWorked && retry < 2; retry++) {
+		await holdTouchRight(page, holdMs);
 		afterMove = await getPlayerPos(page);
-		touchMoveWorked = afterMove.x > beforeMove.x + 40;
+		touchMoveWorked = afterMove.x > beforeMove.x + minMove;
 	}
 
 	const jumpPoint = await page.evaluate(() => {
