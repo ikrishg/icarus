@@ -25,7 +25,10 @@ import {
 	isPortraitBlockerActive,
 	PORTRAIT_BLOCKER_MEDIA,
 } from '../util/portraitBlocker';
-import { touchChromeMetrics } from '../util/touchLayout';
+import {
+	touchChromeMetrics,
+	touchInstructionPanelCenterY,
+} from '../util/touchLayout';
 
 /** Max touch spawn offset from authored start (buttons are translucent). */
 const TOUCH_SPAWN_MAX_DELTA_FROM_START = 72;
@@ -133,6 +136,8 @@ export class Play extends Scene {
 	private pausePanel?: Phaser.GameObjects.Container;
 	private isPaused = false;
 	private portraitBlockerPauseActive = false;
+	private pendingTouchLandscapeSpawn = false;
+	private lastTouchDisplayHeight = 0;
 	private runEndedOnDeath = false;
 
 	constructor() {
@@ -215,6 +220,7 @@ export class Play extends Scene {
 					this.clearLevelInstruction();
 					this.clearColliders();
 					this.isResetting = false;
+					this.pendingTouchLandscapeSpawn = false;
 					this.player.isDead = false;
 					this.player.controlsEnabled = true;
 					this.levelManager.goto(levelIndex);
@@ -386,6 +392,8 @@ export class Play extends Scene {
 	) {
 		if (!this.player || this.player.isDead || this.isResetting) return;
 		if (!this.deathSequence) return;
+		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body | null;
+		if (!body) return;
 
 		const fast = options.fast === true;
 		const spendLife = options.spendLife !== false;
@@ -393,6 +401,7 @@ export class Play extends Scene {
 		this.clearLevelInstruction();
 		this.setGameplayHudVisible(false);
 		this.isResetting = true;
+		this.levelManager.setFireballTimersPaused(true);
 		this.sound.play('death', { volume: 0.6 });
 
 		this.runEndedOnDeath = false;
@@ -437,6 +446,7 @@ export class Play extends Scene {
 				if (this.player) {
 					this.player.controlsEnabled = true;
 				}
+				this.syncTouchLandscapeSpawnIfNeeded();
 				finishDeath();
 			},
 		});
@@ -455,10 +465,14 @@ export class Play extends Scene {
 		this.clearColliders();
 		this.levelManager.goto(levelIndex);
 		const spawnPos = this.touchSpawnPosition();
+		if (isPortraitBlockerActive() && this.touchControls?.visible) {
+			this.pendingTouchLandscapeSpawn = true;
+		}
 		this.player.revive(spawnPos.x, spawnPos.y);
 		this.setupLevelColliders();
 		this.showLevelInstruction();
 		this.playBattleMusic();
+		this.syncTouchLandscapeSpawnIfNeeded();
 	}
 
 	clearLevelInstruction() {
@@ -649,7 +663,10 @@ export class Play extends Scene {
 			top: y - body.halfHeight,
 			bottom: y + body.halfHeight,
 		};
-		const buttons = this.touchControls.getLeftMovementButtonBounds?.() ?? [];
+		const buttons = [
+			...(this.touchControls.getLeftMovementButtonBounds?.() ?? []),
+			...(this.touchControls.getGameplayButtonBounds?.() ?? []),
+		];
 		return buttons.some(
 			(b) =>
 				playerRect.left < b.right - 0.5 &&
@@ -704,7 +721,12 @@ export class Play extends Scene {
 		if (!this.touchControls?.visible) {
 			return { x: start.x, y: start.y };
 		}
-		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
+		const body = this.player?.sprite?.body as
+			| Phaser.Physics.Arcade.Body
+			| undefined;
+		if (!body) {
+			return { x: start.x, y: start.y };
+		}
 		const clusterMin = this.touchControls.getMinSpawnX(body.halfWidth);
 		const maxX = Math.max(
 			start.x + TOUCH_SPAWN_MAX_DELTA_FROM_START,
@@ -729,7 +751,7 @@ export class Play extends Scene {
 				(tx) => tx >= clusterMin && clusterOk(tx),
 			);
 			if (clusterSafe.length > 0) {
-				x = clusterSafe[clusterSafe.length - 1];
+				x = clusterSafe.find((tx) => tx >= clusterMin) ?? clusterSafe[0];
 			} else {
 				const pastCluster = candidates
 					.filter((tx) => tx >= clusterMin)
@@ -755,10 +777,10 @@ export class Play extends Scene {
 				}
 			}
 			let clusterBest: number | null = null;
-			const scanFrom = Math.max(start.x, clusterMin);
-			for (let tx = scanFrom; tx <= Math.min(hazardCap, searchMaxX); tx += 8) {
+			for (let tx = clusterMin; tx <= Math.min(hazardCap, searchMaxX); tx += 8) {
 				if (hazardOk(tx) && ledgeOk(tx) && clusterOk(tx)) {
 					clusterBest = tx;
+					break;
 				}
 			}
 			if (clusterBest != null) {
@@ -795,12 +817,36 @@ export class Play extends Scene {
 				for (let tx = clusterMin; tx <= searchMaxX; tx += 8) {
 					if (hazardOk(tx) && ledgeOk(tx) && clusterOk(tx)) {
 						escape = tx;
+						break;
 					}
 				}
 				if (escape != null) {
 					x = escape;
 				} else if (hazardOk(clusterMin) && ledgeOk(clusterMin)) {
 					x = clusterMin;
+				}
+			}
+			if (this.touchSpawnOverlapsCluster(x, start.y)) {
+				let cleared: number | null = null;
+				for (let tx = clusterMin; tx <= searchMaxX; tx += 8) {
+					if (
+						ledgeOk(tx) &&
+						hazardOk(tx) &&
+						!this.touchSpawnOverlapsCluster(tx, start.y)
+					) {
+						cleared = tx;
+						break;
+					}
+				}
+				if (cleared != null) {
+					x = cleared;
+				} else {
+					for (let tx = clusterMin; tx <= searchMaxX; tx += 8) {
+						if (ledgeOk(tx) && !this.touchSpawnOverlapsCluster(tx, start.y)) {
+							x = tx;
+							break;
+						}
+					}
 				}
 			}
 		}
@@ -856,9 +902,68 @@ export class Play extends Scene {
 	};
 
 	handleDisplayResize(): void {
+		const displayH = this.scale.displaySize.height;
+		const viewportShrank =
+			this.lastTouchDisplayHeight > 0 &&
+			displayH < this.lastTouchDisplayHeight - 0.5;
+		this.lastTouchDisplayHeight = displayH;
 		this.touchControls?.relayout();
-		this.relayoutTouchChromeHud();
+		if (!this.isResetting) {
+			this.relayoutTouchChromeHud();
+		}
 		this.syncPortraitBlockerPause();
+		if (
+			viewportShrank &&
+			!this.isResetting &&
+			!this.player?.isDead
+		) {
+			this.pushPlayerClearOfTouchButtons();
+		}
+	}
+
+	private pushPlayerClearOfTouchButtons(): void {
+		if (!this.touchControls?.visible || !this.player?.sprite?.body) return;
+		if (this.player.isDead || this.isResetting) return;
+		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
+		const buttons = [
+			...(this.touchControls.getLeftMovementButtonBounds?.() ?? []),
+			...(this.touchControls.getGameplayButtonBounds?.() ?? []),
+		];
+		if (buttons.length === 0) return;
+
+		const overlapsAt = (centerX: number) => {
+			const left = centerX - body.halfWidth;
+			const right = centerX + body.halfWidth;
+			const top = body.top;
+			const bottom = body.bottom;
+			return buttons.some(
+				(b) =>
+					left < b.right - 0.5 &&
+					right > b.left + 0.5 &&
+					top < b.bottom &&
+					bottom > b.top,
+			);
+		};
+
+		const startX = this.player.sprite.x;
+		if (!overlapsAt(startX)) return;
+
+		const minX = body.halfWidth;
+		const maxX = WIDTH - body.halfWidth;
+		let best: number | null = null;
+		let bestDist = Infinity;
+		for (let tx = minX; tx <= maxX; tx += 4) {
+			if (!overlapsAt(tx)) {
+				const d = Math.abs(tx - startX);
+				if (d < bestDist) {
+					bestDist = d;
+					best = tx;
+				}
+			}
+		}
+		if (best == null) return;
+		this.player.sprite.setX(best);
+		body.updateFromGameObject();
 	}
 
 	private relayoutTouchChromeHud(): void {
@@ -889,21 +994,15 @@ export class Play extends Scene {
 		this.levelManager.setFireballTimersPaused(false);
 	}
 
-	private canResumeAfterPortraitBlocker(): boolean {
-		if (isPortraitBlockerActive()) return false;
-		if (this.deathSequence?.isEscBlocked()) return false;
-		if (this.isResetting || this.player?.isDead) return false;
-		if (this.pausePanel) return false;
-		return true;
-	}
-
 	syncPortraitBlockerPause(): void {
 		if (!isTouchDevice(this)) return;
+		const world = this.physics?.world;
+		if (!world) return;
 		if (isPortraitBlockerActive()) {
 			if (this.pausePanel) return;
 			this.portraitBlockerPauseActive = true;
 			this.isPaused = true;
-			if (!this.physics.world.isPaused) {
+			if (!world.isPaused) {
 				this.physics.pause();
 			}
 			if (!this.deathSequence?.isEscBlocked() && !this.isResetting) {
@@ -915,11 +1014,27 @@ export class Play extends Scene {
 			return;
 		}
 		this.portraitBlockerPauseActive = false;
-		if (this.isPaused || this.physics.world.isPaused) {
+		if (this.isPaused || world.isPaused) {
 			this.isPaused = false;
 			this.physics.resume();
 			this.setGameplayClockPaused(false);
 		}
+		this.syncTouchLandscapeSpawnIfNeeded();
+	}
+
+	private syncTouchLandscapeSpawnIfNeeded(): void {
+		if (!this.pendingTouchLandscapeSpawn || !this.player?.sprite?.body) {
+			return;
+		}
+		if (this.player.isDead || isPortraitBlockerActive()) {
+			return;
+		}
+		this.pendingTouchLandscapeSpawn = false;
+		this.touchControls?.relayout();
+		const spawn = this.touchSpawnPosition();
+		this.player.setPosition(spawn.x, spawn.y);
+		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
+		body.updateFromGameObject();
 	}
 
 	requestPause() {
@@ -1058,7 +1173,9 @@ export class Play extends Scene {
 			lvl.instruction ?? 'Reach the portal.',
 		);
 
-		const panelY = PLAY_HUD_CLEARANCE_Y + 110;
+		const panelY = isTouchDevice(this)
+			? touchInstructionPanelCenterY(this)
+			: PLAY_HUD_CLEARANCE_Y + 110;
 		this.instructionPanel = this.add
 			.rectangle(
 				this.cameras.main.width / 2,

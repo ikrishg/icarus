@@ -23,6 +23,7 @@ export class LevelManager {
 	fireballs: Fireball[] = [];
 	fireballTimers: Phaser.Time.TimerEvent[] = [];
 	lavaTimers: Phaser.Time.TimerEvent[] = [];
+	levelStartedAt = 0;
 	private hudObjects: Phaser.GameObjects.GameObject[] = [];
 
 	getHudTitle(): Phaser.GameObjects.Text | undefined {
@@ -90,6 +91,7 @@ export class LevelManager {
 		this.lavaTimers = [];
 
 		const level = this.current;
+		this.levelStartedAt = this.scene.time.now;
 
 		const touch = isTouchDevice(this.scene);
 		const chrome = touch ? touchChromeMetrics(this.scene) : null;
@@ -288,11 +290,16 @@ export class LevelManager {
 					this.fireballs = this.fireballs.filter((fb) => fb.sprite?.active);
 				};
 
+				const initialSpawn = this.scene.time.delayedCall(delay, spawnFireball);
+				if (this.scene.time.paused) {
+					initialSpawn.paused = true;
+				}
+				this.fireballTimers.push(initialSpawn);
+
 				const timer = this.scene.time.addEvent({
 					delay: interval,
 					callback: spawnFireball,
 					loop: true,
-					startAt: delay,
 				});
 				if (this.scene.time.paused) {
 					timer.paused = true;
@@ -405,7 +412,13 @@ export class LevelManager {
 	relayoutTouchHudTitle(chrome: TouchChromeMetrics): void {
 		if (!isTouchDevice(this.scene)) return;
 		const title = this.hudObjects[0];
-		if (!title || !('setPosition' in title) || !('setWordWrapWidth' in title)) {
+		if (
+			!title ||
+			!('active' in title) ||
+			!(title as Phaser.GameObjects.GameObject).active ||
+			!('setPosition' in title) ||
+			!('setWordWrapWidth' in title)
+		) {
 			return;
 		}
 		const titleWrap = WIDTH - chrome.rightReserve - chrome.margin * 2;

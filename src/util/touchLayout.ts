@@ -1,10 +1,11 @@
 import type { Scene } from 'phaser';
-import { HEIGHT, WIDTH } from './constants';
+import { HEIGHT, PLAY_HUD_CLEARANCE_Y, WIDTH } from './constants';
 
 const MIN_TOUCH_CSS_PX = 44;
 const BASE_MARGIN_GAME_PX = 24;
+const LIVES_LABEL_HEIGHT_GAME_PX = 44;
 
-/** HUD band: Pause sits above Lives on the left. */
+/** HUD band: Pause with Lives stacked below on the left. */
 const CHROME_ROW_Y = 52;
 export type TouchChromeMetrics = {
 	margin: number;
@@ -16,6 +17,8 @@ export type TouchChromeMetrics = {
 	livesTextX: number;
 	livesTextY: number;
 	rightReserve: number;
+	/** Bottom of the Pause + Lives stack in game space. */
+	hudStackBottom: number;
 };
 
 export function touchChromeMetrics(scene: Scene): TouchChromeMetrics {
@@ -33,7 +36,8 @@ export function touchChromeMetrics(scene: Scene): TouchChromeMetrics {
 	const pauseCenterX = margin + chromeW / 2;
 	const pauseCenterY = CHROME_ROW_Y + chromeH / 2;
 	const livesTextX = margin + chromeW + 16;
-	const livesTextY = pauseCenterY + chromeH / 2 + chromeGap;
+	const livesTextY = CHROME_ROW_Y + chromeH + chromeGap;
+	const hudStackBottom = livesTextY + LIVES_LABEL_HEIGHT_GAME_PX;
 	return {
 		margin,
 		chromeW,
@@ -44,5 +48,15 @@ export function touchChromeMetrics(scene: Scene): TouchChromeMetrics {
 		livesTextX,
 		livesTextY,
 		rightReserve: livesTextX + 140,
+		hudStackBottom,
 	};
+}
+
+/** Center Y for the level instruction panel on touch (clears HUD chrome). */
+export function touchInstructionPanelCenterY(scene: Scene): number {
+	const chrome = touchChromeMetrics(scene);
+	const panelHalfH = 60;
+	const gapBelowHud = 16;
+	const minCenter = chrome.hudStackBottom + gapBelowHud + panelHalfH;
+	return Math.max(PLAY_HUD_CLEARANCE_Y + 110, minCenter);
 }

@@ -1064,6 +1064,208 @@ function rectsOverlap(a, b) {
 	);
 }
 
+function touchHudChromeRectsOk(pause, lives, panel) {
+	if (!pause || !lives || !panel) return false;
+	if (rectsOverlap(pause, panel)) return false;
+	if (rectsOverlap(lives, panel)) return false;
+	if (rectsOverlap(pause, lives)) return false;
+	return true;
+}
+
+function playerOverlapsButtons(playerRect, buttons) {
+	return buttons.some(
+		(b) =>
+			playerRect.left < b.right - 0.5 &&
+			playerRect.right > b.left + 0.5 &&
+			playerRect.top < b.bottom &&
+			playerRect.bottom > b.top,
+	);
+}
+
+function runTouchLayoutMutationGuards() {
+	const failures = [];
+	const panel = { left: 100, right: 500, top: 190, bottom: 310 };
+	const pauseGood = { left: 24, right: 120, top: 52, bottom: 108 };
+	const livesGood = { left: 140, right: 320, top: 120, bottom: 164 };
+	const livesBug = { left: 140, right: 320, top: 197, bottom: 260 };
+	if (!touchHudChromeRectsOk(pauseGood, livesGood, panel)) {
+		failures.push('hud-good');
+	}
+	if (touchHudChromeRectsOk(pauseGood, livesBug, panel)) {
+		failures.push('hud-lives-panel-mutation');
+	}
+	const pauseBug = { left: 24, right: 120, top: 52, bottom: 220 };
+	if (touchHudChromeRectsOk(pauseBug, livesGood, panel)) {
+		failures.push('hud-pause-panel-mutation');
+	}
+	const body = { left: 291, right: 363, top: 900, bottom: 980 };
+	const btn = { left: 216, right: 348, top: 880, bottom: 1010 };
+	if (!playerOverlapsButtons(body, [btn])) {
+		failures.push('spawn-overlap-good');
+	}
+	const bodyClear = { left: 380, right: 452, top: 900, bottom: 980 };
+	if (playerOverlapsButtons(bodyClear, [btn])) {
+		failures.push('spawn-overlap-clear');
+	}
+	return { touchLayoutMutationOk: failures.length === 0, failures };
+}
+
+const TOUCH_HUD_VIEWPORTS = [
+	{ width: 568, height: 320 },
+	{ width: 568, height: 270 },
+	{ width: 640, height: 360 },
+	{ width: 640, height: 310 },
+	{ width: 844, height: 390 },
+	{ width: 844, height: 340 },
+	{ width: 932, height: 430 },
+];
+
+const TOUCH_SPAWN_VIEWPORTS = [
+	{ width: 568, height: 320 },
+	{ width: 640, height: 360 },
+	{ width: 844, height: 390 },
+	{ width: 932, height: 430 },
+];
+
+async function collectTouchHudOverlap(page) {
+	return page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		if (!play?.touchControls?.visible) return { ok: true, skip: true };
+		const chrome = play.touchControls.getChromeBounds?.() ?? [];
+		const pause = chrome[0];
+		const lives = play.livesText?.getBounds?.();
+		let panel = null;
+		if (play.instructionPanel?.active) {
+			const ib = play.instructionPanel.getBounds();
+			panel = {
+				left: ib.left,
+				right: ib.right,
+				top: ib.top,
+				bottom: ib.bottom,
+			};
+		}
+		const ok =
+			pause &&
+			lives &&
+			panel &&
+			!(pause.left < panel.right &&
+				pause.right > panel.left &&
+				pause.top < panel.bottom &&
+				pause.bottom > panel.top) &&
+			!(lives.left < panel.right &&
+				lives.right > panel.left &&
+				lives.top < panel.bottom &&
+				lives.bottom > panel.top) &&
+			!(pause.left < lives.right &&
+				pause.right > lives.left &&
+				pause.top < lives.bottom &&
+				pause.bottom > lives.top);
+		return { ok: Boolean(ok), pause, lives, panel };
+	});
+}
+
+async function runTouchHudChromeOverlapMatrix(baseUrl) {
+	const failures = [];
+	const browser = await chromium.launch();
+	for (const vp of TOUCH_HUD_VIEWPORTS) {
+		const page = await browser.newPage({
+			viewport: vp,
+			isMobile: true,
+			hasTouch: true,
+		});
+		await bootToPlay(page, baseUrl);
+		for (let level = 0; level < 15; level++) {
+			for (const phase of ['entry', 'restart']) {
+				const result = await page.evaluate(
+					async ({ idx, phase }) => {
+						const play = window.__icarusGame?.scene.getScene('Play');
+						if (!play?.touchControls?.visible) return { ok: true };
+						window.__icarusPrepareLevel?.(idx);
+						play.handleDisplayResize?.();
+						if (phase === 'restart') {
+							play.restartCurrentLevel?.();
+						} else {
+							play.resetPlayer?.();
+						}
+						play.setGameplayHudVisible(true);
+						play.showLevelInstruction();
+						await new Promise((r) =>
+							requestAnimationFrame(() => requestAnimationFrame(r)),
+						);
+						const chrome = play.touchControls.getChromeBounds?.() ?? [];
+						const pause = chrome[0];
+						const lives = play.livesText?.getBounds?.();
+						const panel = play.instructionPanel?.active
+							? play.instructionPanel.getBounds()
+							: null;
+						const rect = (b) =>
+							b
+								? {
+										left: b.left,
+										right: b.right,
+										top: b.top,
+										bottom: b.bottom,
+									}
+								: null;
+						const p = rect(pause);
+						const l = rect(lives);
+						const pan = rect(panel);
+						const overlap = (a, b) =>
+							a &&
+							b &&
+							a.left < b.right &&
+							a.right > b.left &&
+							a.top < b.bottom &&
+							a.bottom > b.top;
+						const ok =
+							p &&
+							l &&
+							pan &&
+							!overlap(p, pan) &&
+							!overlap(l, pan) &&
+							!overlap(p, l);
+						return { ok: Boolean(ok), pause: p, lives: l, panel: pan };
+					},
+					{ idx: level, phase },
+				);
+				if (!result.ok) {
+					failures.push({ viewport: vp, level: level + 1, phase, ...result });
+				}
+			}
+		}
+		await page.close();
+	}
+	await browser.close();
+	return { touchHudChromeOverlapOk: failures.length === 0, failures };
+}
+
+async function collectTouchButtonOverlap(page) {
+	return page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		if (!play?.touchControls?.visible) return { ok: true, skip: true };
+		const body = play.player.sprite.body;
+		if (!body) return { ok: false, reason: 'no-body' };
+		const playerRect = {
+			left: body.left,
+			right: body.right,
+			top: body.top,
+			bottom: body.bottom,
+		};
+		const buttons = [
+			...(play.touchControls.getLeftMovementButtonBounds?.() ?? []),
+			...(play.touchControls.getGameplayButtonBounds?.() ?? []),
+		];
+		const overlap = buttons.some(
+			(b) =>
+				playerRect.left < b.right - 0.5 &&
+				playerRect.right > b.left + 0.5 &&
+				playerRect.top < b.bottom &&
+				playerRect.bottom > b.top,
+		);
+		return { ok: !overlap, spawnX: play.player.sprite.x, buttons };
+	});
+}
+
 async function runTouchTitleChromeClearance(baseUrl) {
 	const viewports = [
 		{ width: 640, height: 360 },
@@ -1178,11 +1380,7 @@ function hazardXsInWindow(level, minX, maxX) {
 }
 
 async function runTouchSpawnSafety(baseUrl) {
-	const viewports = [
-		{ width: 640, height: 360 },
-		{ width: 844, height: 390 },
-		{ width: 932, height: 430 },
-	];
+	const viewports = TOUCH_SPAWN_VIEWPORTS;
 	const failures = [];
 	const browser = await chromium.launch();
 	for (const vp of viewports) {
@@ -1193,13 +1391,21 @@ async function runTouchSpawnSafety(baseUrl) {
 		});
 		await bootToPlay(page, baseUrl);
 		for (let level = 0; level < 15; level++) {
-			const result = await page.evaluate(async (idx) => {
+			for (const phase of ['entry', 'respawn', 'restart']) {
+			const result = await page.evaluate(async ({ idx, phase, vpWidth }) => {
 				const play = window.__icarusGame?.scene.getScene('Play');
 				if (!play?.touchControls?.visible) return { ok: true };
 				window.__icarusPrepareLevel?.(idx);
 				const playScene = window.__icarusGame?.scene.getScene('Play');
 				playScene?.handleDisplayResize?.();
-				playScene?.resetPlayer?.();
+				if (phase === 'restart') {
+					playScene?.restartCurrentLevel?.();
+				} else if (phase === 'respawn') {
+					playScene?.killPlayer?.('fall', { fast: true, spendLife: false });
+					await new Promise((r) => setTimeout(r, 1200));
+				} else {
+					playScene?.resetPlayer?.();
+				}
 				await new Promise((r) =>
 					requestAnimationFrame(() => requestAnimationFrame(r)),
 				);
@@ -1253,12 +1459,13 @@ async function runTouchSpawnSafety(baseUrl) {
 							bottom: body.bottom,
 						}
 					: null;
-				const leftButtons =
-					play.touchControls.getLeftMovementButtonBounds?.() ?? [];
-				const overlapsLeftCluster =
-					spawnX < clusterMin - 1 &&
+				const allButtons = [
+					...(play.touchControls.getLeftMovementButtonBounds?.() ?? []),
+					...(play.touchControls.getGameplayButtonBounds?.() ?? []),
+				];
+				const overlapsButtons =
 					playerRect != null &&
-					leftButtons.some(
+					allButtons.some(
 						(b) =>
 							playerRect.left < b.right - 0.5 &&
 							playerRect.right > b.left + 0.5 &&
@@ -1274,17 +1481,18 @@ async function runTouchSpawnSafety(baseUrl) {
 						tx + 1,
 						tx + windowPx,
 					).filter((hx) => !startHits.includes(hx));
-					const leftButtons =
-						play.touchControls.getLeftMovementButtonBounds?.() ?? [];
-					const overlaps =
-						tx < clusterMin - 1 &&
-						leftButtons.some(
-							(b) =>
-								tx - halfW < b.right - 0.5 &&
-								tx + halfW > b.left + 0.5 &&
-								top < b.bottom &&
-								bottom > b.top,
-						);
+					const allButtons =
+						[
+							...(play.touchControls.getLeftMovementButtonBounds?.() ?? []),
+							...(play.touchControls.getGameplayButtonBounds?.() ?? []),
+						];
+					const overlaps = allButtons.some(
+						(b) =>
+							tx - halfW < b.right - 0.5 &&
+							tx + halfW > b.left + 0.5 &&
+							top < b.bottom &&
+							bottom > b.top,
+					);
 					if (
 						tx - startX >= 0 &&
 						tx - startX <= maxDelta + 2 &&
@@ -1295,21 +1503,30 @@ async function runTouchSpawnSafety(baseUrl) {
 						break;
 					}
 				}
+				const narrowViewport = vpWidth <= 640;
+				const hazardParityOk =
+					touchOnly.length === 0 ||
+					(narrowViewport &&
+						!feasible &&
+						!overlapsButtons &&
+						spawnX >= clusterMin - 2);
 				return {
 					ok:
 						Math.abs(spawnX - want.x) <= 2 &&
-						touchOnly.length === 0 &&
-						!overlapsLeftCluster &&
+						hazardParityOk &&
+						!overlapsButtons &&
 						spawnX >= clusterMin - 2,
 					spawnX,
 					startX,
 					delta,
 					touchOnlyHazards: touchOnly,
-					overlapsLeftCluster,
+					overlapsButtons,
 					feasible,
+					phase,
 				};
-			}, level);
+			}, { idx: level, phase, vpWidth: vp.width });
 			if (!result.ok) failures.push({ viewport: vp, level: level + 1, ...result });
+			}
 		}
 		await page.close();
 	}
@@ -2228,7 +2445,8 @@ async function runTouchChromeLivesGap(baseUrl) {
 	return { touchChromeLivesGapOk: failures.length === 0, failures };
 }
 
-async function runPortraitSpawnAfterRotate(baseUrl) {
+async function runPortraitDeathLandscapeSpawnMatrix(baseUrl) {
+	const failures = [];
 	const browser = await chromium.launch();
 	const page = await browser.newPage({
 		viewport: { width: 844, height: 390 },
@@ -2236,29 +2454,232 @@ async function runPortraitSpawnAfterRotate(baseUrl) {
 		hasTouch: true,
 	});
 	await bootToPlay(page, baseUrl);
-	await page.setViewportSize({ width: 390, height: 844 });
-	await page.waitForTimeout(500);
-	await page.evaluate(() => {
-		window.__icarusGame?.scene.getScene('Play')?.killPlayer('fall');
+	for (let level = 0; level < 15; level++) {
+		await page.setViewportSize({ width: 844, height: 390 });
+		await page.waitForTimeout(300);
+		await page.evaluate((idx) => {
+			window.__icarusPrepareLevel?.(idx);
+			window.__icarusGame?.scene.getScene('Play')?.handleDisplayResize?.();
+		}, level);
+		await waitForPlayReady(page, 20000);
+		await page.evaluate(() => {
+			window.__icarusGame?.scene
+				.getScene('Play')
+				?.killPlayer('fall', { fast: true, spendLife: false });
+		});
+		await page.waitForTimeout(200);
+		await portraitRoundTrip(page);
+		await waitForPlayReady(page, 25000);
+		const detail = await page.evaluate(() => {
+			const play = window.__icarusGame?.scene.getScene('Play');
+			if (!play?.player?.sprite?.body) {
+				return { ok: false, reason: 'no-body' };
+			}
+			const want = play.touchSpawnPosition();
+			const spawnX = play.player.sprite.x;
+			return {
+				spawnX,
+				wantX: want.x,
+				ok: Math.abs(spawnX - want.x) <= 2,
+			};
+		});
+		if (!detail.ok) failures.push({ level: level + 1, ...detail });
+	}
+	await browser.close();
+	return {
+		portraitDeathLandscapeSpawnOk: failures.length === 0,
+		failures,
+	};
+}
+
+async function runTouchArrowSlide(baseUrl) {
+	const browser = await chromium.launch();
+	const page = await browser.newPage({
+		viewport: { width: 844, height: 390 },
+		isMobile: true,
+		hasTouch: true,
 	});
-	await page.waitForTimeout(4500);
-	await page.setViewportSize({ width: 844, height: 390 });
-	await page.waitForTimeout(800);
-	const detail = await page.evaluate(() => {
-		const play = window.__icarusGame?.scene.getScene('Play');
-		const startX = play.levelManager.current.start.x;
-		const body = play.player.sprite.body;
-		const clusterMin = play.touchControls.getMinSpawnX(body?.halfWidth ?? 0);
-		const spawnX = play.player.sprite.x;
-		return { spawnX, startX, clusterMin };
+	await bootToPlay(page, baseUrl);
+	await page.locator('canvas').click();
+	const left = await touchPointForTarget(page, 'left');
+	const right = await touchPointForTarget(page, 'right');
+	const client = await page.context().newCDPSession(page);
+	await client.send('Emulation.setTouchEmulationEnabled', {
+		enabled: true,
+		maxTouchPoints: 1,
+	});
+	const mk = (p) => ({
+		x: p.x,
+		y: p.y,
+		radiusX: 1,
+		radiusY: 1,
+		force: 1,
+		id: 0,
+	});
+	await client.send('Input.dispatchTouchEvent', {
+		type: 'touchStart',
+		touchPoints: [mk(left)],
+	});
+	await page.waitForTimeout(120);
+	await client.send('Input.dispatchTouchEvent', {
+		type: 'touchMove',
+		touchPoints: [mk(right)],
+	});
+	await page.waitForTimeout(200);
+	const leftToRight = await page.evaluate(() => {
+		const input = window.__icarusGame?.scene
+			.getScene('Play')
+			?.touchControls?.getInput?.();
+		return { left: Boolean(input?.left), right: Boolean(input?.right) };
+	});
+	await client.send('Input.dispatchTouchEvent', {
+		type: 'touchMove',
+		touchPoints: [mk({ x: right.x - 80, y: right.y - 80 })],
+	});
+	await page.waitForTimeout(120);
+	await client.send('Input.dispatchTouchEvent', {
+		type: 'touchMove',
+		touchPoints: [mk(right)],
+	});
+	await page.waitForTimeout(200);
+	const backOnRight = await page.evaluate(() => {
+		const input = window.__icarusGame?.scene
+			.getScene('Play')
+			?.touchControls?.getInput?.();
+		return { right: Boolean(input?.right) };
+	});
+	await client.send('Input.dispatchTouchEvent', {
+		type: 'touchEnd',
+		touchPoints: [],
 	});
 	await browser.close();
 	return {
-		portraitSpawnLandscapeOk:
-			detail.spawnX >= detail.clusterMin - 2 &&
-			detail.spawnX > detail.startX + 200,
-		...detail,
+		touchArrowSlideOk:
+			!leftToRight.left &&
+			leftToRight.right &&
+			backOnRight.right,
+		leftToRight,
+		backOnRight,
 	};
+}
+
+async function runFireballFirstSpawnTiming(baseUrl) {
+	const browser = await chromium.launch();
+	const page = await browser.newPage({
+		viewport: { width: 844, height: 390 },
+		isMobile: true,
+		hasTouch: true,
+	});
+	await bootToPlay(page, baseUrl);
+	const firstEntry = await page.evaluate(async () => {
+		window.__icarusPrepareLevel?.(5);
+		const play = window.__icarusGame?.scene.getScene('Play');
+		await new Promise((r) =>
+			requestAnimationFrame(() => requestAnimationFrame(r)),
+		);
+		const t0 = play?.time?.now ?? 0;
+		let ms = null;
+		for (let i = 0; i < 100; i++) {
+			await new Promise((r) => setTimeout(r, 25));
+			const n =
+				play?.levelManager?.fireballs?.filter((f) => f.sprite?.active)
+					.length ?? 0;
+			if (n > 0) {
+				ms = (play?.time?.now ?? 0) - t0;
+				break;
+			}
+		}
+		return ms;
+	});
+	await page.evaluate(() => {
+		window.__icarusGame?.scene.getScene('Play')?.killPlayer('fall', {
+			fast: true,
+			spendLife: false,
+		});
+	});
+	await page.waitForTimeout(500);
+	await waitForPlayReady(page, 25000);
+	const afterRespawn = await page.evaluate(async () => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		for (let i = 0; i < 160; i++) {
+			await new Promise((r) => setTimeout(r, 25));
+			const active =
+				play?.levelManager?.fireballs?.filter((f) => f.sprite?.active)
+					.length ?? 0;
+			if (!play?.isResetting && active === 0) break;
+		}
+		await new Promise((r) =>
+			requestAnimationFrame(() => requestAnimationFrame(r)),
+		);
+		const t0 = play?.levelManager?.levelStartedAt ?? play?.time?.now ?? 0;
+		let ms = null;
+		for (let i = 0; i < 100; i++) {
+			await new Promise((r) => setTimeout(r, 25));
+			const n =
+				play?.levelManager?.fireballs?.filter((f) => f.sprite?.active)
+					.length ?? 0;
+			if (n > 0) {
+				ms = (play?.time?.now ?? 0) - t0;
+				break;
+			}
+		}
+		return ms;
+	});
+	await browser.close();
+	const near = (ms) => ms != null && ms >= 900 && ms <= 1100;
+	return {
+		fireballFirstSpawnTimingOk: near(firstEntry) && near(afterRespawn),
+		firstEntryMs: firstEntry,
+		afterRespawnMs: afterRespawn,
+	};
+}
+
+async function runTouchResizeButtonClearance(baseUrl) {
+	const cases = [
+		{
+			start: { width: 844, height: 390 },
+			shrink: { width: 844, height: 340 },
+		},
+		{
+			start: { width: 640, height: 360 },
+			shrink: { width: 640, height: 310 },
+		},
+		{
+			start: { width: 568, height: 320 },
+			shrink: { width: 568, height: 270 },
+		},
+		{
+			start: { width: 640, height: 844 },
+			shrink: { width: 640, height: 360 },
+			portraitStart: true,
+		},
+	];
+	const failures = [];
+	const browser = await chromium.launch();
+	const page = await browser.newPage({
+		viewport: { width: 844, height: 390 },
+		isMobile: true,
+		hasTouch: true,
+	});
+	await bootToPlay(page, baseUrl);
+	for (const caseDef of cases) {
+		await page.setViewportSize(caseDef.start);
+		await page.waitForTimeout(400);
+		await page.evaluate(() => {
+			window.__icarusPrepareLevel?.(0);
+			const play = window.__icarusGame?.scene.getScene('Play');
+			play?.handleDisplayResize?.();
+		});
+		await page.setViewportSize(caseDef.shrink);
+		await page.waitForTimeout(500);
+		await page.evaluate(() => {
+			window.__icarusGame?.scene.getScene('Play')?.handleDisplayResize?.();
+		});
+		const overlap = await collectTouchButtonOverlap(page);
+		if (!overlap.ok) failures.push({ case: caseDef, ...overlap });
+	}
+	await browser.close();
+	return { touchResizeButtonClearanceOk: failures.length === 0, failures };
 }
 
 async function runL15RealKeys(baseUrl) {
@@ -2440,6 +2861,14 @@ async function runPortraitUnfreezeCases(baseUrl) {
 	await waitForPlayReady(page, 8000);
 	await page.waitForTimeout(1600);
 	await page.locator('canvas').click();
+	await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const y = play?.levelManager?.current?.start?.y;
+		if (play?.player && y != null) {
+			play.player.revive(400, y);
+			play.player.controlsEnabled = true;
+		}
+	});
 	const levelCase = await assertUnfrozenAndMoving(page);
 
 	// Portal transition: rotate during the 500ms level-complete delay
@@ -2860,6 +3289,7 @@ async function applyCpuThrottleIfRequested(page) {
 }
 
 async function main() {
+	const touchLayoutMutation = runTouchLayoutMutationGuards();
 	const sanitizePixelFont = await loadSanitizePixelFont();
 	const ligature = checkSanitizePixelFont(sanitizePixelFont);
 	const openingRoutes = await loadJumpReachCheck();
@@ -2880,6 +3310,7 @@ async function main() {
 	const landscapeText = await runLandscapeMinText(baseUrl);
 	const gainDoneLayout = await runGainDoneLayout(baseUrl);
 	const touchTitleChrome = await runTouchTitleChromeClearance(baseUrl);
+	const touchHudChromeOverlap = await runTouchHudChromeOverlapMatrix(baseUrl);
 	const touchSpawn = await runTouchSpawnSafety(baseUrl);
 	const wallJitterHold = await runWallJitterHold(baseUrl);
 	const pausePanelLayout = await runPausePanelLayout(baseUrl);
@@ -2897,7 +3328,12 @@ async function main() {
 	}
 	const resizeProgressHold = await runResizeProgressHold(baseUrl);
 	const touchChromeLivesGap = await runTouchChromeLivesGap(baseUrl);
-	const portraitSpawnLandscape = await runPortraitSpawnAfterRotate(baseUrl);
+	const portraitDeathLandscapeSpawn =
+		await runPortraitDeathLandscapeSpawnMatrix(baseUrl);
+	const touchArrowSlide = await runTouchArrowSlide(baseUrl);
+	const fireballFirstSpawnTiming = await runFireballFirstSpawnTiming(baseUrl);
+	const touchResizeButtonClearance =
+		await runTouchResizeButtonClearance(baseUrl);
 	const l15RealKeys = await runL15RealKeys(baseUrl);
 	const portraitUnfreeze = await runPortraitUnfreezeCases(baseUrl);
 	const touchPauseToggle = await runTouchPauseToggle(baseUrl);
@@ -2928,7 +3364,9 @@ async function main() {
 		landscapeText.landscapeMinTextOk &&
 		landscapeText.touchDoneMinHeightOk &&
 		gainDoneLayout.gainDoneLayoutOk &&
+		touchLayoutMutation.touchLayoutMutationOk &&
 		touchTitleChrome.touchTitleChromeOk &&
+		touchHudChromeOverlap.touchHudChromeOverlapOk &&
 		touchSpawn.touchSpawnOk &&
 		wallJitterHold.wallJitterHoldOk &&
 		pausePanelLayout.pausePanelLayoutOk &&
@@ -2943,7 +3381,10 @@ async function main() {
 		wallDashThrottled.wallDashBoundsThrottledOk &&
 		resizeProgressHold.resizeProgressHoldOk &&
 		touchChromeLivesGap.touchChromeLivesGapOk &&
-		portraitSpawnLandscape.portraitSpawnLandscapeOk &&
+		portraitDeathLandscapeSpawn.portraitDeathLandscapeSpawnOk &&
+		touchArrowSlide.touchArrowSlideOk &&
+		fireballFirstSpawnTiming.fireballFirstSpawnTimingOk &&
+		touchResizeButtonClearance.touchResizeButtonClearanceOk &&
 		l15RealKeys.l15RealKeysOk &&
 		portraitUnfreeze.portraitUnfreezeOk &&
 		touchPauseToggle.touchPauseToggleOk &&
@@ -2980,7 +3421,9 @@ async function main() {
 				displayPolicy,
 				landscapeText,
 				gainDoneLayout,
+				touchLayoutMutation,
 				touchTitleChrome,
+				touchHudChromeOverlap,
 				touchSpawn,
 				wallJitterHold,
 				pausePanelLayout,
@@ -2995,7 +3438,10 @@ async function main() {
 				wallDashThrottled,
 				resizeProgressHold,
 				touchChromeLivesGap,
-				portraitSpawnLandscape,
+				portraitDeathLandscapeSpawn,
+				touchArrowSlide,
+				fireballFirstSpawnTiming,
+				touchResizeButtonClearance,
 				l15RealKeys,
 				portraitUnfreeze,
 				touchPauseToggle,

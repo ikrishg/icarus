@@ -71,6 +71,7 @@ export class TouchControls {
 	private readonly pointerReleaseHandlers: Array<{
 		pointerId: number | null;
 		role: HoldRole;
+		press: () => void;
 		release: () => void;
 	}> = [];
 	private readonly onGlobalPointerRelease = (
@@ -95,6 +96,23 @@ export class TouchControls {
 				this.activeHolds.delete(pointer.id);
 			}
 		}
+		for (const entry of this.pointerReleaseHandlers) {
+			if (!this.pointerHitsRole(pointer, entry.role)) continue;
+			if (entry.pointerId === pointer.id) continue;
+			const heldRole = this.activeHolds.get(pointer.id);
+			if (heldRole && heldRole !== entry.role) {
+				const prev = this.pointerReleaseHandlers.find(
+					(h) => h.role === heldRole && h.pointerId === pointer.id,
+				);
+				if (prev) {
+					prev.pointerId = null;
+					prev.release();
+				}
+			}
+			entry.pointerId = pointer.id;
+			this.activeHolds.set(pointer.id, entry.role);
+			entry.press();
+		}
 	};
 
 	constructor(scene: Scene) {
@@ -113,26 +131,6 @@ export class TouchControls {
 		this.onPause = onPause;
 	}
 
-	private setRoleDown(role: HoldRole, down: boolean): void {
-		switch (role) {
-			case 'left':
-				this.state.left = down;
-				break;
-			case 'right':
-				this.state.right = down;
-				break;
-			case 'jump':
-				this.state.jump = down;
-				break;
-			case 'dash':
-				this.state.dash = down;
-				break;
-			case 'shoot':
-				this.state.shoot = down;
-				break;
-		}
-	}
-
 	private pointerHitsRole(
 		pointer: Phaser.Input.Pointer,
 		role: HoldRole,
@@ -148,11 +146,15 @@ export class TouchControls {
 		);
 	}
 
-	/** Minimum player center X clearing only the left movement cluster (◀ ▶). */
+	/** Minimum player center X clearing live ◀ ▶ hit rects (after layout). */
 	getMinSpawnX(bodyHalfWidth = 0): number {
 		if (!this.visible) return 0;
-		const { margin, gap } = this.layoutMetrics();
-		const size = Math.min(96, this.layoutMetrics().size);
+		const buttons = this.getLeftMovementButtonBounds();
+		if (buttons.length > 0) {
+			const clusterRight = Math.max(...buttons.map((b) => b.right));
+			return clusterRight + PLAYER_SPAWN_PAD + bodyHalfWidth;
+		}
+		const { margin, gap, size } = this.layoutMetrics();
 		const leftX = margin + size / 2;
 		const rightX = leftX + size + gap;
 		const clusterRight = rightX + size / 2;
@@ -250,9 +252,11 @@ export class TouchControls {
 			if (!role) continue;
 			if (this.pointerHitsRole(pointer, role)) {
 				this.activeHolds.set(id, role);
-				this.setRoleDown(role, true);
 				const slot = this.pointerReleaseHandlers.find((h) => h.role === role);
-				if (slot) slot.pointerId = id;
+				if (slot) {
+					slot.pointerId = id;
+					slot.press();
+				}
 			}
 		}
 	}
@@ -308,6 +312,7 @@ export class TouchControls {
 		const pointerSlot = {
 			pointerId: null as number | null,
 			role,
+			press: onDown,
 			release: onUp,
 		};
 		this.pointerReleaseHandlers.push(pointerSlot);
