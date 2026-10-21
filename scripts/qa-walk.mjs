@@ -1957,48 +1957,50 @@ async function runFireballPauseStack(baseUrl) {
 	});
 	await bootToPlay(page, baseUrl);
 	await page.evaluate(() => {
-		const play = window.__icarusGame?.scene.getScene('Play');
-		play.time.paused = true;
-		play.time.timeScale = 0;
-		play.physics.pause();
 		window.__icarusPrepareLevel?.(5);
-		play?.levelManager?.setFireballTimersPaused?.(true);
-		play?.requestPause();
+	});
+	await page.waitForTimeout(80);
+	await page.evaluate(() => {
+		window.__icarusGame?.scene.getScene('Play')?.requestPause();
 	});
 	await page.waitForTimeout(8000);
 	const pausedCount = await page.evaluate(() => {
 		const play = window.__icarusGame?.scene.getScene('Play');
-		return (
+		const active =
 			play?.levelManager?.fireballs?.filter((f) => f.sprite?.active).length ??
-			0
+			0;
+		const timersPaused = (play?.levelManager?.fireballTimers ?? []).every(
+			(t) => t.paused,
 		);
+		const clockPaused = Boolean(play?.time?.paused);
+		return { active, timersPaused, clockPaused };
 	});
 	await page.evaluate(() => {
-		const play = window.__icarusGame?.scene.getScene('Play');
-		play?.closePause();
-		play.time.paused = false;
-		play.time.timeScale = 1;
-		play?.levelManager?.setFireballTimersPaused?.(false);
+		window.__icarusGame?.scene.getScene('Play')?.closePause();
 	});
 	await page.waitForTimeout(1200);
-	const counts = await page.evaluate(() => {
+	const afterResume = await page.evaluate(() => {
 		const play = window.__icarusGame?.scene.getScene('Play');
 		const active =
 			play?.levelManager?.fireballs?.filter((f) => f.sprite?.active)
 				.length ?? 0;
-		const timers =
-			play?.levelManager?.fireballTimers?.map((t) => ({
-				paused: t.paused,
-				delay: t.delay,
-			})) ?? [];
-		return { active, timers };
+		const timersPaused = (play?.levelManager?.fireballTimers ?? []).some(
+			(t) => t.paused,
+		);
+		return { active, timersPaused, clockPaused: Boolean(play?.time?.paused) };
 	});
 	await browser.close();
 	return {
-		fireballPauseStackOk: pausedCount <= 1,
-		activeFireballs: counts.active,
+		fireballPauseStackOk:
+			pausedCount.active <= 1 &&
+			pausedCount.timersPaused &&
+			pausedCount.clockPaused &&
+			!afterResume.timersPaused &&
+			!afterResume.clockPaused &&
+			afterResume.active <= pausedCount.active + 1,
+		activeFireballs: afterResume.active,
 		pausedCount,
-		fireballTimers: counts.timers,
+		afterResume,
 	};
 }
 
@@ -2075,11 +2077,17 @@ async function sampleWallDashBounds(page, { side, disableWorldClamp }) {
 	}
 	await page.keyboard.up('KeyQ');
 	await page.keyboard.up(moveKey);
-	await page.evaluate(() => {
-		window.__icarusWallDashProbe?.off?.();
+	const probeOk = await page.evaluate(() => {
+		const probe = window.__icarusWallDashProbe;
+		probe?.off?.();
+		const result = probe?.ok === true;
 		delete window.__icarusWallDashProbe;
+		return result;
 	});
-	return { ok, frames: Math.max(frames, poststepFrames) };
+	return {
+		ok: ok && probeOk,
+		frames: Math.max(frames, poststepFrames),
+	};
 }
 
 async function runWallDashBoundsCheck(baseUrl) {

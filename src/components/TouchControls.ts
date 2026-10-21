@@ -151,7 +151,8 @@ export class TouchControls {
 	/** Minimum player center X clearing only the left movement cluster (◀ ▶). */
 	getMinSpawnX(bodyHalfWidth = 0): number {
 		if (!this.visible) return 0;
-		const { size, margin, gap } = this.layoutMetrics();
+		const { margin, gap } = this.layoutMetrics();
+		const size = Math.min(96, this.layoutMetrics().size);
 		const leftX = margin + size / 2;
 		const rightX = leftX + size + gap;
 		const clusterRight = rightX + size / 2;
@@ -261,12 +262,9 @@ export class TouchControls {
 			this.scene.scale.displaySize.width / WIDTH,
 			this.scene.scale.displaySize.height / HEIGHT,
 		);
-		const size = Math.min(
-			96,
-			Math.max(
-				BASE_BTN_GAME_PX,
-				Math.ceil(MIN_TOUCH_CSS_PX / displayScale),
-			),
+		const size = Math.max(
+			BASE_BTN_GAME_PX,
+			Math.ceil(MIN_TOUCH_CSS_PX / displayScale),
 		);
 		const margin = Math.max(
 			BASE_MARGIN_GAME_PX,
