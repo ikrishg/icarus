@@ -62,6 +62,12 @@ export class LevelManager {
 		this.renderCurrent();
 	}
 
+	setFireballTimersPaused(paused: boolean): void {
+		for (const timer of this.fireballTimers) {
+			timer.paused = paused;
+		}
+	}
+
 	renderCurrent() {
 		this.portalTrigger = null;
 		this.visuals.clear(true, true);
@@ -281,9 +287,6 @@ export class LevelManager {
 					// Clean up destroyed fireballs
 					this.fireballs = this.fireballs.filter((fb) => fb.sprite?.active);
 				};
-
-				const firstSpawn = this.scene.time.delayedCall(delay, spawnFireball);
-				this.fireballTimers.push(firstSpawn);
 
 				const timer = this.scene.time.addEvent({
 					delay: interval,

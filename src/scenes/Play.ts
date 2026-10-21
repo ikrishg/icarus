@@ -307,19 +307,18 @@ export class Play extends Scene {
 
 	update() {
 		if (isTouchDevice(this)) {
-			if (
-				isPortraitBlockerActive() &&
-				!this.pausePanel &&
-				!this.physics.world.isPaused
-			) {
-				this.portraitBlockerPauseActive = true;
+			if (isPortraitBlockerActive() && !this.pausePanel) {
+				if (!this.portraitBlockerPauseActive) {
+					this.portraitBlockerPauseActive = true;
+				}
 				this.isPaused = true;
-				this.physics.pause();
-				this.setGameplayClockPaused(true);
-			} else if (
-				this.portraitBlockerPauseActive &&
-				!isPortraitBlockerActive()
-			) {
+				if (!this.physics.world.isPaused) {
+					this.physics.pause();
+				}
+				if (!this.deathSequence?.isEscBlocked()) {
+					this.setGameplayClockPaused(true);
+				}
+			} else if (!isPortraitBlockerActive()) {
 				this.syncPortraitBlockerPause();
 			}
 		}
@@ -400,7 +399,14 @@ export class Play extends Scene {
 		const finishDeath = () => {
 			this.setGameplayHudVisible(true);
 			this.isResetting = false;
-			if (!this.pausePanel && !isPortraitBlockerActive()) {
+			if (isPortraitBlockerActive()) {
+				this.portraitBlockerPauseActive = true;
+				this.isPaused = true;
+				if (!this.physics.world.isPaused) {
+					this.physics.pause();
+				}
+				this.setGameplayClockPaused(true);
+			} else if (!this.pausePanel) {
 				this.isPaused = false;
 				this.physics.resume();
 				this.setGameplayClockPaused(false);
@@ -662,7 +668,12 @@ export class Play extends Scene {
 			(this.player.sprite.body as Phaser.Physics.Arcade.Body).halfWidth,
 		);
 		const touchHits = this.hazardXsInWindow(level, spawnX + 1, spawnX + windowPx);
-		const startHits = this.hazardXsInWindow(level, startX + 1, startX + windowPx);
+		const desktopParityPx = 250;
+		const startHits = this.hazardXsInWindow(
+			level,
+			startX + 1,
+			startX + desktopParityPx,
+		);
 		return touchHits.some((hx) => !startHits.includes(hx));
 	}
 
@@ -719,12 +730,49 @@ export class Play extends Scene {
 			if (clusterSafe.length > 0) {
 				x = clusterSafe[clusterSafe.length - 1];
 			} else {
-				const pastCluster = candidates.filter((tx) => tx >= clusterMin);
+				const pastCluster = candidates
+					.filter((tx) => tx >= clusterMin)
+					.filter((tx) => clusterOk(tx));
 				if (pastCluster.length > 0) {
 					x = pastCluster[pastCluster.length - 1];
 				} else {
-					x = candidates[candidates.length - 1];
+					const overlapSafe = candidates.filter((tx) => clusterOk(tx));
+					x =
+						overlapSafe.length > 0
+							? overlapSafe[overlapSafe.length - 1]
+							: start.x;
 				}
+			}
+		}
+		if (this.touchControls?.visible) {
+			let hazardCap = start.x;
+			for (let tx = maxX; tx >= start.x; tx -= 8) {
+				if (hazardOk(tx) && ledgeOk(tx)) {
+					hazardCap = tx;
+					break;
+				}
+			}
+			x = Math.min(x, hazardCap);
+			if (x < clusterMin) {
+				let clusterSpawn = start.x;
+				for (let tx = clusterMin; tx <= hazardCap; tx += 8) {
+					if (hazardOk(tx) && ledgeOk(tx) && clusterOk(tx)) {
+						clusterSpawn = tx;
+					}
+				}
+				if (clusterSpawn >= clusterMin) {
+					x = clusterSpawn;
+				}
+			}
+			if (!clusterOk(x) || !ledgeOk(x) || !hazardOk(x)) {
+				let resolved = start.x;
+				for (let tx = Math.min(hazardCap, maxX); tx >= clusterMin; tx -= 8) {
+					if (hazardOk(tx) && ledgeOk(tx) && clusterOk(tx)) {
+						resolved = tx;
+						break;
+					}
+				}
+				x = resolved;
 			}
 		}
 		return { x, y: start.y };
@@ -802,13 +850,23 @@ export class Play extends Scene {
 		}
 	}
 
+	private gameplayTimeScale = 1;
+
 	private setGameplayClockPaused(paused: boolean): void {
-		this.time.paused = paused;
 		if (paused) {
+			if (this.time.timeScale > 0) {
+				this.gameplayTimeScale = this.time.timeScale;
+			}
+			this.time.timeScale = 0;
+			this.time.paused = true;
 			this.tweens.pauseAll();
-		} else {
-			this.tweens.resumeAll();
+			this.levelManager.setFireballTimersPaused(true);
+			return;
 		}
+		this.time.paused = false;
+		this.time.timeScale = this.gameplayTimeScale;
+		this.tweens.resumeAll();
+		this.levelManager.setFireballTimersPaused(false);
 	}
 
 	private canResumeAfterPortraitBlocker(): boolean {
@@ -827,20 +885,20 @@ export class Play extends Scene {
 			this.isPaused = true;
 			if (!this.physics.world.isPaused) {
 				this.physics.pause();
+			}
+			if (!this.deathSequence?.isEscBlocked()) {
 				this.setGameplayClockPaused(true);
 			}
 			return;
 		}
-		if (!this.portraitBlockerPauseActive) return;
-		if (this.canResumeAfterPortraitBlocker()) {
-			this.portraitBlockerPauseActive = false;
+		if (this.pausePanel || this.isResetting || this.player?.isDead) {
+			return;
+		}
+		this.portraitBlockerPauseActive = false;
+		if (this.isPaused || this.physics.world.isPaused) {
 			this.isPaused = false;
 			this.physics.resume();
 			this.setGameplayClockPaused(false);
-			return;
-		}
-		if (!this.physics.world.isPaused) {
-			this.isPaused = false;
 		}
 	}
 
