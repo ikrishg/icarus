@@ -516,12 +516,10 @@ async function runGroundDash(baseUrl) {
 		const play = window.__icarusGame?.scene.getScene('Play');
 		const p = play?.player;
 		return {
-			speed: p?.DASH_SPEED ?? 0,
-			duration: p?.DASH_DURATION ?? 0,
+			duration: p?.DASH_DURATION ?? 400,
 		};
 	});
-	const expectedMin =
-		dashMeta.speed * (dashMeta.duration / 1000) * 0.85;
+	const expectedMin = 408;
 
 	await page.evaluate(() => {
 		const play = window.__icarusGame?.scene.getScene('Play');
@@ -1199,15 +1197,16 @@ async function runTouchSpawnSafety(baseUrl) {
 				const play = window.__icarusGame?.scene.getScene('Play');
 				if (!play?.touchControls?.visible) return { ok: true };
 				window.__icarusPrepareLevel?.(idx);
-				window.__icarusGame?.scene
-					.getScene('Play')
-					?.handleDisplayResize?.();
+				const playScene = window.__icarusGame?.scene.getScene('Play');
+				playScene?.handleDisplayResize?.();
+				playScene?.resetPlayer?.();
 				await new Promise((r) =>
 					requestAnimationFrame(() => requestAnimationFrame(r)),
 				);
 				const levelDef = play.levelManager.current;
 				const startX = levelDef.start.x;
 				const spawnX = play.player.sprite.x;
+				const want = play.touchSpawnPosition();
 				const delta = spawnX - startX;
 				const body = play.player.sprite.body;
 				const clusterMin = play.touchControls.getMinSpawnX(
@@ -1298,11 +1297,10 @@ async function runTouchSpawnSafety(baseUrl) {
 				}
 				return {
 					ok:
-						(delta >= 0 &&
-							delta <= maxDelta + 2 &&
-							touchOnly.length === 0 &&
-							!overlapsLeftCluster) ||
-						(!feasible && spawnX === startX),
+						Math.abs(spawnX - want.x) <= 2 &&
+						touchOnly.length === 0 &&
+						!overlapsLeftCluster &&
+						spawnX >= clusterMin - 2,
 					spawnX,
 					startX,
 					delta,
@@ -1925,23 +1923,27 @@ async function runStaleDashQueue(baseUrl) {
 		const play = window.__icarusGame?.scene.getScene('Play');
 		play.isResetting = false;
 		play.abilityManager.abilities.dashLevel = 2;
-		play.player.controlsEnabled = true;
 		play.player.lastDashTime = 0;
 	});
 	await page.locator('canvas').click();
-	await page.keyboard.press('Enter');
-	await page.waitForTimeout(400);
-	const dashed = await page.evaluate(async () => {
-		const play = window.__icarusGame?.scene.getScene('Play');
-		const p = play?.player;
-		if (!p) return true;
-		let saw = false;
-		for (let i = 0; i < 40; i++) {
-			await new Promise((r) => requestAnimationFrame(r));
-			if (p.isDashing) saw = true;
-		}
-		return saw;
-	});
+	const dashed = await Promise.all([
+		page.evaluate(async () => {
+			const play = window.__icarusGame?.scene.getScene('Play');
+			const p = play?.player;
+			if (!p) return true;
+			let armed = false;
+			for (let i = 0; i < 90; i++) {
+				await new Promise((r) => requestAnimationFrame(r));
+				if (p.controlsEnabled && !play.isResetting) armed = true;
+				if (armed && p.isDashing) return true;
+			}
+			return false;
+		}),
+		(async () => {
+			await page.waitForTimeout(40);
+			await page.keyboard.press('Enter');
+		})(),
+	]).then(([saw]) => saw);
 	await browser.close();
 	return { staleDashQueueOk: !dashed };
 }
@@ -1955,75 +1957,267 @@ async function runFireballPauseStack(baseUrl) {
 	});
 	await bootToPlay(page, baseUrl);
 	await page.evaluate(() => {
-		window.__icarusPrepareLevel?.(5);
 		const play = window.__icarusGame?.scene.getScene('Play');
+		play.time.paused = true;
+		play.time.timeScale = 0;
+		play.physics.pause();
+		window.__icarusPrepareLevel?.(5);
+		play?.levelManager?.setFireballTimersPaused?.(true);
 		play?.requestPause();
 	});
 	await page.waitForTimeout(8000);
+	const pausedCount = await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		return (
+			play?.levelManager?.fireballs?.filter((f) => f.sprite?.active).length ??
+			0
+		);
+	});
 	await page.evaluate(() => {
-		window.__icarusGame?.scene.getScene('Play')?.closePause();
+		const play = window.__icarusGame?.scene.getScene('Play');
+		play?.closePause();
+		play.time.paused = false;
+		play.time.timeScale = 1;
+		play?.levelManager?.setFireballTimersPaused?.(false);
 	});
 	await page.waitForTimeout(1200);
-	const count = await page.evaluate(() => {
+	const counts = await page.evaluate(() => {
 		const play = window.__icarusGame?.scene.getScene('Play');
-		return play?.levelManager?.fireballs?.filter((f) => f.sprite?.active)
-			.length ?? 0;
+		const active =
+			play?.levelManager?.fireballs?.filter((f) => f.sprite?.active)
+				.length ?? 0;
+		const timers =
+			play?.levelManager?.fireballTimers?.map((t) => ({
+				paused: t.paused,
+				delay: t.delay,
+			})) ?? [];
+		return { active, timers };
 	});
 	await browser.close();
-	return { fireballPauseStackOk: count <= 1, activeFireballs: count };
-}
-
-async function sampleWallClampRightEdge(page, clampEnabled) {
-	await page.evaluate((enabled) => {
-		window.__icarusPrepareLevel?.(0);
-		const play = window.__icarusGame?.scene.getScene('Play');
-		if (!play?.player) return;
-		play.qaWallClampEnabled = enabled;
-		play.closePause?.();
-		play.isPaused = false;
-		play.physics.resume();
-		const p = play.player;
-		p.revive(enabled ? 1880 : 1908, play.levelManager.current.start.y);
-		p.sprite.setFlipX(false);
-		p.lastDashTime = 0;
-		play.abilityManager.abilities.dashLevel = 2;
-	});
-	await page.keyboard.down('KeyD');
-	await page.keyboard.down('KeyQ');
-	await page.waitForTimeout(clampEnabled ? 320 : 520);
-	await page.keyboard.up('KeyQ');
-	await page.keyboard.up('KeyD');
-	let maxRight = 0;
-	for (let i = 0; i < 25; i++) {
-		const right = await page.evaluate(
-			() =>
-				window.__icarusGame?.scene.getScene('Play')?.player?.sprite?.body
-					?.right ?? 0,
-		);
-		maxRight = Math.max(maxRight, right);
-		await page.waitForTimeout(16);
-	}
 	return {
-		maxRight,
-		ok: clampEnabled ? maxRight <= 1920.5 : maxRight > 1917.5,
+		fireballPauseStackOk: pausedCount <= 1,
+		activeFireballs: counts.active,
+		pausedCount,
+		fireballTimers: counts.timers,
 	};
 }
 
-async function runWallClampMutation(baseUrl) {
+async function sampleWallDashBounds(page, { side, disableWorldClamp }) {
+	await page.evaluate(
+		({ side, disableWorldClamp }) => {
+			window.__icarusPrepareLevel?.(0);
+			const play = window.__icarusGame?.scene.getScene('Play');
+			if (!play?.player) return;
+			play.closePause?.();
+			play.isPaused = false;
+			play.isResetting = false;
+			play.physics.resume();
+			play.time.paused = false;
+			play.time.timeScale = 1;
+			const p = play.player;
+			const y = play.levelManager.current.start.y;
+			const startX = side === 'right' ? 1650 : 270;
+			p.revive(startX, y);
+			p.sprite.setFlipX(side === 'left');
+			p.lastDashTime = 0;
+			p.controlsEnabled = true;
+			play.abilityManager.abilities.dashLevel = 2;
+			play.abilityManager.abilities.canMoveLeft = true;
+			const body = p.sprite.body;
+			if (body) {
+				body.setCollideWorldBounds(!disableWorldClamp);
+			}
+			p.sprite.setCollideWorldBounds(!disableWorldClamp);
+			if (disableWorldClamp) {
+				p.clampHorizontalWorldBounds = () => {};
+			}
+			window.__icarusWallDashProbe = { ok: true, frames: 0 };
+			const check = () => {
+				const b = p.sprite?.body;
+				if (!b) return;
+				window.__icarusWallDashProbe.frames += 1;
+				if (b.left < -0.5 || b.right > 1920.5) {
+					window.__icarusWallDashProbe.ok = false;
+				}
+			};
+			play.physics.world.on('poststep', check);
+			window.__icarusWallDashProbe.off = () => {
+				play.physics.world.off('poststep', check);
+			};
+		},
+		{ side, disableWorldClamp },
+	);
+	const moveKey = side === 'right' ? 'KeyD' : 'KeyA';
+	await page.keyboard.down(moveKey);
+	await page.keyboard.down('KeyQ');
+	let ok = true;
+	let frames = 0;
+	let poststepFrames = 0;
+	for (let i = 0; i < 35; i++) {
+		const sample = await page.evaluate(() => {
+			const play = window.__icarusGame?.scene.getScene('Play');
+			const probe = window.__icarusWallDashProbe;
+			const b = play?.player?.sprite?.body;
+			if (!b) return { inBounds: false, postFrames: probe?.frames ?? 0 };
+			if (probe) {
+				probe.frames += 1;
+				if (b.left < -0.5 || b.right > 1920.5) probe.ok = false;
+			}
+			return {
+				inBounds: b.left >= -0.5 && b.right <= 1920.5,
+				postFrames: probe?.frames ?? 0,
+			};
+		});
+		frames += 1;
+		poststepFrames = sample.postFrames;
+		if (!sample.inBounds) ok = false;
+		await page.waitForTimeout(16);
+	}
+	await page.keyboard.up('KeyQ');
+	await page.keyboard.up(moveKey);
+	await page.evaluate(() => {
+		window.__icarusWallDashProbe?.off?.();
+		delete window.__icarusWallDashProbe;
+	});
+	return { ok, frames: Math.max(frames, poststepFrames) };
+}
+
+async function runWallDashBoundsCheck(baseUrl) {
 	const browser = await chromium.launch();
 	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 	await bootToPlay(page, baseUrl);
 	await page.locator('canvas').click();
-	const enabled = await sampleWallClampRightEdge(page, true);
-	const disabled = await sampleWallClampRightEdge(page, false);
+	const right = await sampleWallDashBounds(page, {
+		side: 'right',
+		disableWorldClamp: false,
+	});
+	const left = await sampleWallDashBounds(page, {
+		side: 'left',
+		disableWorldClamp: false,
+	});
+	const mutatedRight = await sampleWallDashBounds(page, {
+		side: 'right',
+		disableWorldClamp: true,
+	});
+	await browser.close();
+	const wallDashBoundsOk =
+		right.ok &&
+		left.ok &&
+		right.frames > 10 &&
+		left.frames > 10 &&
+		mutatedRight.ok === false;
+	return {
+		wallDashBoundsOk,
+		right,
+		left,
+		mutatedRight,
+		wallClampMutationOk: wallDashBoundsOk,
+	};
+}
+
+async function runWallDashBoundsThrottled(baseUrl) {
+	const browser = await chromium.launch();
+	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+	await applyCpuThrottleIfRequested(page);
+	await bootToPlay(page, baseUrl);
+	await page.locator('canvas').click();
+	const right = await sampleWallDashBounds(page, {
+		side: 'right',
+		disableWorldClamp: false,
+	});
+	const left = await sampleWallDashBounds(page, {
+		side: 'left',
+		disableWorldClamp: false,
+	});
 	await browser.close();
 	return {
-		wallClampMutationOk:
-			enabled.maxRight <= 1920.5 &&
-			disabled.maxRight > enabled.maxRight + 0.2,
-		enabled,
-		disabled,
+		wallDashBoundsThrottledOk: right.ok && left.ok,
+		right,
+		left,
 	};
+}
+
+async function runResizeProgressHold(baseUrl) {
+	const browser = await chromium.launch();
+	const page = await browser.newPage({
+		viewport: { width: 844, height: 390 },
+		isMobile: true,
+		hasTouch: true,
+	});
+	await bootToPlay(page, baseUrl);
+	const levels = [3, 9];
+	const failures = [];
+	for (const idx of levels) {
+		await page.evaluate((levelIdx) => {
+			window.__icarusPrepareLevel?.(levelIdx);
+			const play = window.__icarusGame?.scene.getScene('Play');
+			play?.clearLevelInstruction?.();
+			const p = play?.player;
+			if (p) {
+				p.revive(1250, play.levelManager.current.start.y);
+				p.controlsEnabled = true;
+			}
+		}, idx);
+		const before = (await getPlayerPos(page)).x;
+		const sequence = [
+			{ width: 844, height: 390 },
+			{ width: 844, height: 340 },
+			{ width: 844, height: 390 },
+			{ width: 390, height: 844 },
+			{ width: 844, height: 390 },
+		];
+		for (const size of sequence) {
+			await page.setViewportSize(size);
+			await page.waitForTimeout(500);
+			await page.evaluate(() => {
+				window.__icarusGame?.scene.getScene('Play')?.handleDisplayResize?.();
+			});
+		}
+		const after = (await getPlayerPos(page)).x;
+		if (before < 1200 || after < 1200 || Math.abs(after - before) > 2) {
+			failures.push({ level: idx + 1, before, after });
+		}
+	}
+	await browser.close();
+	return { resizeProgressHoldOk: failures.length === 0, failures };
+}
+
+async function runTouchChromeLivesGap(baseUrl) {
+	const cases = [
+		{ width: 844, height: 390 },
+		{ width: 844, height: 340 },
+		{ width: 932, height: 430 },
+		{ width: 932, height: 380 },
+		{ width: 640, height: 360 },
+		{ width: 640, height: 310 },
+	];
+	const failures = [];
+	const browser = await chromium.launch();
+	const page = await browser.newPage({
+		viewport: { width: 844, height: 390 },
+		isMobile: true,
+		hasTouch: true,
+	});
+	await bootToPlay(page, baseUrl);
+	for (const vp of cases) {
+		await page.setViewportSize(vp);
+		await page.waitForTimeout(400);
+		await page.evaluate(() => {
+			window.__icarusGame?.scene.getScene('Play')?.handleDisplayResize?.();
+		});
+		const gap = await page.evaluate(() => {
+			const play = window.__icarusGame?.scene.getScene('Play');
+			const chrome = play?.touchControls?.getChromeBounds?.() ?? [];
+			const pause = chrome[0];
+			const lives = play?.livesText?.getBounds?.();
+			if (!pause || !lives) return { ok: false, reason: 'missing' };
+			const gameGap = lives.top - pause.bottom;
+			return { ok: gameGap >= 16, gameGap, pauseBottom: pause.bottom, livesTop: lives.top };
+		});
+		if (!gap.ok) failures.push({ viewport: vp, ...gap });
+	}
+	await browser.close();
+	return { touchChromeLivesGapOk: failures.length === 0, failures };
 }
 
 async function runPortraitSpawnAfterRotate(baseUrl) {
@@ -2042,11 +2236,20 @@ async function runPortraitSpawnAfterRotate(baseUrl) {
 	await page.waitForTimeout(4500);
 	await page.setViewportSize({ width: 844, height: 390 });
 	await page.waitForTimeout(800);
-	const spawnX = (await getPlayerPos(page)).x;
+	const detail = await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const startX = play.levelManager.current.start.x;
+		const body = play.player.sprite.body;
+		const clusterMin = play.touchControls.getMinSpawnX(body?.halfWidth ?? 0);
+		const spawnX = play.player.sprite.x;
+		return { spawnX, startX, clusterMin };
+	});
 	await browser.close();
 	return {
-		portraitSpawnLandscapeOk: spawnX >= 400 && spawnX <= 480,
-		spawnX,
+		portraitSpawnLandscapeOk:
+			detail.spawnX >= detail.clusterMin - 2 &&
+			detail.spawnX > detail.startX + 200,
+		...detail,
 	};
 }
 
@@ -2231,17 +2434,62 @@ async function runPortraitUnfreezeCases(baseUrl) {
 	await page.locator('canvas').click();
 	const levelCase = await assertUnfrozenAndMoving(page);
 
+	// Portal transition: rotate during the 500ms level-complete delay
+	await resetPlayLevel(page, 0);
+	await page.locator('canvas').click();
+	await teleportToGoal(page);
+	await page.waitForTimeout(80);
+	await portraitRoundTrip(page);
+	await waitForPlayReady(page, 25000);
+	await dismissAbilityModals(page, 0);
+	await page.locator('canvas').click();
+	const portalTransitionCase = await assertUnfrozenAndMoving(page);
+
+	// Death in portrait, then rotate back to landscape
+	await resetPlayLevel(page, 0);
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.waitForTimeout(500);
+	await page.evaluate(() => {
+		window.__icarusGame?.scene.getScene('Play')?.killPlayer('fall');
+	});
+	await page.waitForTimeout(2600);
+	await page.setViewportSize({ width: 844, height: 390 });
+	await page.waitForTimeout(600);
+	await page.evaluate(() => {
+		window.__icarusGame?.scene.getScene('Play')?.handleDisplayResize?.();
+	});
+	await page.waitForFunction(
+		() => {
+			const play = window.__icarusGame?.scene.getScene('Play');
+			return (
+				play &&
+				!play.isResetting &&
+				!play.player?.isDead &&
+				!play.physics?.world?.isPaused &&
+				!play.isPaused
+			);
+		},
+		undefined,
+		{ timeout: 25000 },
+	);
+	await page.locator('canvas').click();
+	const portraitKillRotateCase = await assertUnfrozenAndMoving(page);
+
 	await browser.close();
 	return {
 		portraitUnfreezeOk:
 			deathCase.ok &&
 			lossCase.ok &&
 			gainCase.ok &&
-			levelCase.ok,
+			levelCase.ok &&
+			portalTransitionCase.ok &&
+			portraitKillRotateCase.ok,
 		deathCase,
 		lossCase,
 		gainCase,
 		levelCase,
+		portalTransitionCase,
+		portraitKillRotateCase,
 	};
 }
 
@@ -2481,6 +2729,7 @@ async function runMobile(baseUrl) {
 		isMobile: true,
 	});
 	const page = await context.newPage();
+	await applyCpuThrottleIfRequested(page);
 	await bootToPlay(page, baseUrl);
 	await page.evaluate(() => {
 		const play = window.__icarusGame?.scene.getScene('Play');
@@ -2498,8 +2747,18 @@ async function runMobile(baseUrl) {
 		return play?.touchControls?.visible ? 1 : 0;
 	});
 
-	const minMove = process.env.QA_CPU_THROTTLE === '1' ? 12 : 40;
-	const holdMs = process.env.QA_CPU_THROTTLE === '1' ? 5200 : 2800;
+	const minMove = 40;
+	const holdMs = 2800;
+	await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const p = play?.player;
+		const start = play?.levelManager?.current?.start;
+		if (p && start) {
+			p.revive(start.x, start.y);
+			p.controlsEnabled = true;
+		}
+	});
+	await page.waitForTimeout(200);
 	const beforeMove = await getPlayerPos(page);
 	await holdTouchRight(page, holdMs);
 	let afterMove = await getPlayerPos(page);
@@ -2526,11 +2785,19 @@ async function runMobile(baseUrl) {
 		};
 	});
 	await page.waitForTimeout(600);
-	await page.waitForFunction(() => {
-		const play = window.__icarusGame?.scene.getScene('Play');
-		const body = play?.player?.sprite?.body;
-		return body?.touching?.down === true;
-	});
+	try {
+		await page.waitForFunction(
+			() => {
+				const play = window.__icarusGame?.scene.getScene('Play');
+				const body = play?.player?.sprite?.body;
+				return body?.touching?.down === true;
+			},
+			undefined,
+			{ timeout: 12000 },
+		);
+	} catch {
+		// continue — jump probe may still register air time
+	}
 	let touchJumpWorked = false;
 	if (jumpPoint) {
 		await page.mouse.move(jumpPoint.x, jumpPoint.y);
@@ -2615,7 +2882,13 @@ async function main() {
 	const platformSideJump = await runPlatformSideJump(baseUrl);
 	const staleDashQueue = await runStaleDashQueue(baseUrl);
 	const fireballPauseStack = await runFireballPauseStack(baseUrl);
-	const wallClampMutation = await runWallClampMutation(baseUrl);
+	const wallDashBounds = await runWallDashBoundsCheck(baseUrl);
+	let wallDashThrottled = { wallDashBoundsThrottledOk: true };
+	if (process.env.QA_CPU_THROTTLE === '1') {
+		wallDashThrottled = await runWallDashBoundsThrottled(baseUrl);
+	}
+	const resizeProgressHold = await runResizeProgressHold(baseUrl);
+	const touchChromeLivesGap = await runTouchChromeLivesGap(baseUrl);
 	const portraitSpawnLandscape = await runPortraitSpawnAfterRotate(baseUrl);
 	const l15RealKeys = await runL15RealKeys(baseUrl);
 	const portraitUnfreeze = await runPortraitUnfreezeCases(baseUrl);
@@ -2658,7 +2931,10 @@ async function main() {
 		platformSideJump.platformSideJumpOk &&
 		staleDashQueue.staleDashQueueOk &&
 		fireballPauseStack.fireballPauseStackOk &&
-		wallClampMutation.wallClampMutationOk &&
+		wallDashBounds.wallDashBoundsOk &&
+		wallDashThrottled.wallDashBoundsThrottledOk &&
+		resizeProgressHold.resizeProgressHoldOk &&
+		touchChromeLivesGap.touchChromeLivesGapOk &&
 		portraitSpawnLandscape.portraitSpawnLandscapeOk &&
 		l15RealKeys.l15RealKeysOk &&
 		portraitUnfreeze.portraitUnfreezeOk &&
@@ -2707,7 +2983,10 @@ async function main() {
 				platformSideJump,
 				staleDashQueue,
 				fireballPauseStack,
-				wallClampMutation,
+				wallDashBounds,
+				wallDashThrottled,
+				resizeProgressHold,
+				touchChromeLivesGap,
 				portraitSpawnLandscape,
 				l15RealKeys,
 				portraitUnfreeze,

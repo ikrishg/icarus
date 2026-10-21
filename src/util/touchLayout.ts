@@ -14,6 +14,7 @@ export type TouchChromeMetrics = {
 	pauseCenterX: number;
 	pauseCenterY: number;
 	livesTextX: number;
+	livesTextY: number;
 	rightReserve: number;
 };
 
@@ -32,6 +33,7 @@ export function touchChromeMetrics(scene: Scene): TouchChromeMetrics {
 	const pauseCenterX = margin + chromeW / 2;
 	const pauseCenterY = CHROME_ROW_Y + chromeH / 2;
 	const livesTextX = margin + chromeW + 16;
+	const livesTextY = pauseCenterY + chromeH / 2 + chromeGap;
 	return {
 		margin,
 		chromeW,
@@ -40,6 +42,7 @@ export function touchChromeMetrics(scene: Scene): TouchChromeMetrics {
 		pauseCenterX,
 		pauseCenterY,
 		livesTextX,
+		livesTextY,
 		rightReserve: livesTextX + 140,
 	};
 }

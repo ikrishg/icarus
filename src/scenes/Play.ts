@@ -709,6 +709,7 @@ export class Play extends Scene {
 		const maxX = Math.max(
 			start.x + TOUCH_SPAWN_MAX_DELTA_FROM_START,
 			clusterMin + TOUCH_SPAWN_MAX_DELTA_FROM_START,
+			clusterMin + 8,
 		);
 		const level = this.levelManager.current;
 		const hazardOk = (tx: number) =>
@@ -745,34 +746,62 @@ export class Play extends Scene {
 			}
 		}
 		if (this.touchControls?.visible) {
+			const searchMaxX = Math.max(maxX, clusterMin + 72, start.x + 260);
 			let hazardCap = start.x;
-			for (let tx = maxX; tx >= start.x; tx -= 8) {
+			for (let tx = searchMaxX; tx >= start.x; tx -= 8) {
 				if (hazardOk(tx) && ledgeOk(tx)) {
 					hazardCap = tx;
 					break;
 				}
 			}
-			x = Math.min(x, hazardCap);
-			if (x < clusterMin) {
-				let clusterSpawn = start.x;
-				for (let tx = clusterMin; tx <= hazardCap; tx += 8) {
-					if (hazardOk(tx) && ledgeOk(tx) && clusterOk(tx)) {
-						clusterSpawn = tx;
-					}
-				}
-				if (clusterSpawn >= clusterMin) {
-					x = clusterSpawn;
+			let clusterBest: number | null = null;
+			const scanFrom = Math.max(start.x, clusterMin);
+			for (let tx = scanFrom; tx <= Math.min(hazardCap, searchMaxX); tx += 8) {
+				if (hazardOk(tx) && ledgeOk(tx) && clusterOk(tx)) {
+					clusterBest = tx;
 				}
 			}
+			if (clusterBest != null) {
+				x = clusterBest;
+			} else {
+				for (let tx = clusterMin; tx <= Math.min(hazardCap, searchMaxX); tx += 8) {
+					if (hazardOk(tx) && ledgeOk(tx) && clusterOk(tx)) {
+						x = tx;
+						break;
+					}
+				}
+			}
+			x = Math.min(x, hazardCap);
 			if (!clusterOk(x) || !ledgeOk(x) || !hazardOk(x)) {
 				let resolved = start.x;
-				for (let tx = Math.min(hazardCap, maxX); tx >= clusterMin; tx -= 8) {
+				for (let tx = Math.min(hazardCap, searchMaxX); tx >= clusterMin; tx -= 8) {
 					if (hazardOk(tx) && ledgeOk(tx) && clusterOk(tx)) {
 						resolved = tx;
 						break;
 					}
 				}
 				x = resolved;
+			}
+			if (x < clusterMin) {
+				for (let tx = clusterMin; tx <= searchMaxX; tx += 8) {
+					if (hazardOk(tx) && ledgeOk(tx) && clusterOk(tx)) {
+						x = tx;
+						break;
+					}
+				}
+			}
+			if (this.touchSpawnOverlapsCluster(x, start.y)) {
+				let escape: number | null = null;
+				for (let tx = clusterMin; tx <= searchMaxX; tx += 8) {
+					if (hazardOk(tx) && ledgeOk(tx) && clusterOk(tx)) {
+						escape = tx;
+					}
+				}
+				if (escape != null) {
+					x = escape;
+				} else if (hazardOk(clusterMin) && ledgeOk(clusterMin)) {
+					x = clusterMin;
+				}
 			}
 		}
 		return { x, y: start.y };
@@ -790,11 +819,11 @@ export class Play extends Scene {
 
 	createLivesHud() {
 		this.livesText?.destroy();
-		const livesX = isTouchDevice(this)
-			? touchChromeMetrics(this).livesTextX
-			: 24;
+		const chrome = isTouchDevice(this) ? touchChromeMetrics(this) : null;
+		const livesX = chrome ? chrome.livesTextX : 24;
+		const livesY = chrome ? chrome.livesTextY : 58;
 		this.livesText = this.add
-			.text(livesX, 58, this.livesLabel(), {
+			.text(livesX, livesY, this.livesLabel(), {
 				fontFamily: 'Pixelify Sans',
 				fontSize: '40px',
 				color: '#fdfdfe',
@@ -818,10 +847,7 @@ export class Play extends Scene {
 		this.livesText?.setVisible(visible);
 	}
 
-	qaWallClampEnabled = true;
-
 	private clampPlayerToWorldSides = () => {
-		if (!this.qaWallClampEnabled) return;
 		if (!this.player?.sprite?.body || this.player.isDead || this.isPaused) {
 			return;
 		}
@@ -831,23 +857,17 @@ export class Play extends Scene {
 
 	handleDisplayResize(): void {
 		this.touchControls?.relayout();
+		this.relayoutTouchChromeHud();
 		this.syncPortraitBlockerPause();
-		if (
-			isTouchDevice(this) &&
-			!isPortraitBlockerActive() &&
-			this.player &&
-			!this.player.isDead &&
-			!this.isResetting &&
-			this.touchControls?.visible
-		) {
-			const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
-			if (body.touching.down) {
-				const want = this.touchSpawnPosition();
-				if (Math.abs(this.player.sprite.x - want.x) > 4) {
-					this.player.setPosition(want.x, this.player.sprite.y);
-				}
-			}
+	}
+
+	private relayoutTouchChromeHud(): void {
+		if (!isTouchDevice(this)) return;
+		const chrome = touchChromeMetrics(this);
+		if (this.livesText?.active) {
+			this.livesText.setPosition(chrome.livesTextX, chrome.livesTextY);
 		}
+		this.levelManager.relayoutTouchHudTitle(chrome);
 	}
 
 	private gameplayTimeScale = 1;
@@ -886,12 +906,12 @@ export class Play extends Scene {
 			if (!this.physics.world.isPaused) {
 				this.physics.pause();
 			}
-			if (!this.deathSequence?.isEscBlocked()) {
+			if (!this.deathSequence?.isEscBlocked() && !this.isResetting) {
 				this.setGameplayClockPaused(true);
 			}
 			return;
 		}
-		if (this.pausePanel || this.isResetting || this.player?.isDead) {
+		if (this.pausePanel) {
 			return;
 		}
 		this.portraitBlockerPauseActive = false;

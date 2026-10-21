@@ -3,7 +3,7 @@ import { LEVELS } from '../data/levels';
 import { isTouchDevice } from './TouchControls';
 import { DEPTH_PLAY_HUD_BAR, DEPTH_PLAY_HUD_TEXT, WIDTH } from '../util/constants';
 import { touchFontSizeStyle } from '../util/responsiveText';
-import { touchChromeMetrics } from '../util/touchLayout';
+import { touchChromeMetrics, type TouchChromeMetrics } from '../util/touchLayout';
 import type { LevelDefinition, ObstacleDef, Point } from '../util/types';
 import { Fireball } from './Fireball';
 
@@ -288,12 +288,23 @@ export class LevelManager {
 					this.fireballs = this.fireballs.filter((fb) => fb.sprite?.active);
 				};
 
+				if (delay > 0) {
+					const firstSpawn = this.scene.time.delayedCall(delay, spawnFireball);
+					if (this.scene.time.paused) {
+						firstSpawn.paused = true;
+					}
+					this.fireballTimers.push(firstSpawn);
+				}
+
 				const timer = this.scene.time.addEvent({
 					delay: interval,
 					callback: spawnFireball,
 					loop: true,
-					startAt: delay,
+					startAt: delay > 0 ? delay + interval : interval,
 				});
+				if (this.scene.time.paused) {
+					timer.paused = true;
+				}
 
 				this.fireballTimers.push(timer);
 			}
@@ -397,6 +408,19 @@ export class LevelManager {
 				obj.setVisible(visible);
 			}
 		}
+	}
+
+	relayoutTouchHudTitle(chrome: TouchChromeMetrics): void {
+		if (!isTouchDevice(this.scene)) return;
+		const title = this.hudObjects[0];
+		if (!title || !('setPosition' in title) || !('setWordWrapWidth' in title)) {
+			return;
+		}
+		const titleWrap = WIDTH - chrome.rightReserve - chrome.margin * 2;
+		(
+			title as Phaser.GameObjects.Text
+		).setWordWrapWidth(titleWrap);
+		(title as Phaser.GameObjects.Text).setPosition(WIDTH / 2, 50);
 	}
 
 	createPortal(x: number, y: number) {

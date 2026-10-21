@@ -85,6 +85,18 @@ export class TouchControls {
 		this.activeHolds.delete(pointer.id);
 	};
 
+	private readonly onGlobalPointerMove = (pointer: Phaser.Input.Pointer) => {
+		if (!pointer.isDown) return;
+		for (const entry of this.pointerReleaseHandlers) {
+			if (entry.pointerId !== pointer.id) continue;
+			if (!this.pointerHitsRole(pointer, entry.role)) {
+				entry.pointerId = null;
+				entry.release();
+				this.activeHolds.delete(pointer.id);
+			}
+		}
+	};
+
 	constructor(scene: Scene) {
 		this.scene = scene;
 		if (!isTouchDevice(scene)) {
@@ -93,6 +105,7 @@ export class TouchControls {
 		this.visible = true;
 		this.scene.input.on('pointerup', this.onGlobalPointerRelease);
 		this.scene.input.on('pointercancel', this.onGlobalPointerRelease);
+		this.scene.input.on('pointermove', this.onGlobalPointerMove);
 		this.build();
 	}
 
@@ -248,9 +261,12 @@ export class TouchControls {
 			this.scene.scale.displaySize.width / WIDTH,
 			this.scene.scale.displaySize.height / HEIGHT,
 		);
-		const size = Math.max(
-			BASE_BTN_GAME_PX,
-			Math.ceil(MIN_TOUCH_CSS_PX / displayScale),
+		const size = Math.min(
+			96,
+			Math.max(
+				BASE_BTN_GAME_PX,
+				Math.ceil(MIN_TOUCH_CSS_PX / displayScale),
+			),
 		);
 		const margin = Math.max(
 			BASE_MARGIN_GAME_PX,
@@ -279,7 +295,7 @@ export class TouchControls {
 			.setInteractive({ useHandCursor: false });
 		this.buttonHitAreas.set(role, bg);
 
-		const fontSize = Math.max(24, Math.floor(size * 0.32));
+		const fontSize = Math.max(36, Math.floor(size * 0.32));
 		const text = this.scene.add
 			.text(x, y, label, {
 				fontFamily: 'Pixelify Sans',
@@ -525,6 +541,7 @@ export class TouchControls {
 	destroy() {
 		this.scene.input.off('pointerup', this.onGlobalPointerRelease);
 		this.scene.input.off('pointercancel', this.onGlobalPointerRelease);
+		this.scene.input.off('pointermove', this.onGlobalPointerMove);
 		for (const node of [...this.gameplayNodes, ...this.chromeNodes]) {
 			node.destroy();
 		}
