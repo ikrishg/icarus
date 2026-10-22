@@ -404,7 +404,12 @@ export class Player {
 		this.isDead = false;
 		this.sprite.clearTint();
 		this.sprite.setRotation(0);
-		this.sprite.setAngularVelocity(0);
+		const body = this.sprite.body as Phaser.Physics.Arcade.Body | null;
+		if (body) {
+			body.enable = true;
+			body.setAllowGravity(true);
+			this.sprite.setAngularVelocity(0);
+		}
 		this.sprite.play('player-idle');
 		this.setPosition(x, y);
 	}
