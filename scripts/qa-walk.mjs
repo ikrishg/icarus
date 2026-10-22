@@ -3454,10 +3454,8 @@ async function runGainDoneLayout(baseUrl) {
 		{ timeout: 8000 },
 	);
 	await page.locator('canvas').click();
-	for (let i = 0; i < 4; i++) {
-		await page.keyboard.press('Enter');
-		await page.waitForTimeout(280);
-	}
+	await page.keyboard.press('Enter');
+	await page.waitForTimeout(900);
 	const layout = await page.evaluate(() => {
 		const play = window.__icarusGame?.scene.getScene('Play');
 		const helper = play.children.list.find(
