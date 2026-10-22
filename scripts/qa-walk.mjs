@@ -3925,7 +3925,6 @@ async function main() {
 		cwd: process.cwd(),
 		stdio: 'inherit',
 	});
-	const qaOnly = process.env.QA_ONLY?.split(',').map((s) => s.trim()).filter(Boolean) ?? [];
 	const touchLayoutMutation = runTouchLayoutMutationGuards();
 	const sanitizePixelFont = await loadSanitizePixelFont();
 	const ligature = checkSanitizePixelFont(sanitizePixelFont);

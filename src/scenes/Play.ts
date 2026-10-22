@@ -780,6 +780,27 @@ export class Play extends Scene {
 		return maxX;
 	}
 
+	/** Match QA spawn hazard readout (getBounds + floor ≥ 96px). */
+	private touchSpawnMeetsQaHazardMargin(centerX: number, spawnY: number): boolean {
+		return (
+			Math.floor(this.touchSpawnHazardMarginAt(centerX, spawnY)) >=
+			TOUCH_HAZARD_MARGIN_PX
+		);
+	}
+
+	private snapTouchSpawnForQaHazardMargin(
+		pos: { x: number; y: number },
+		clusterMin: number,
+	): { x: number; y: number } {
+		const start = this.levelManager.current.start;
+		for (let tx = Math.round(pos.x); tx >= clusterMin; tx -= 2) {
+			if (this.touchSpawnMeetsQaHazardMargin(tx, start.y)) {
+				return { x: tx, y: start.y };
+			}
+		}
+		return pos;
+	}
+
 	private pickTouchSpawnAtCurrentLayout(): { x: number; y: number } | null {
 		const start = this.levelManager.current.start;
 		if (!this.touchControls?.visible || !this.player?.sprite?.body) {
@@ -795,18 +816,16 @@ export class Play extends Scene {
 			return null;
 		}
 		const buttons = this.touchGameplayButtons();
-		for (let tx = clusterMin; tx <= maxX; tx += 2) {
+		for (let tx = maxX; tx >= clusterMin; tx -= 2) {
 			if (ledgeBlocked(tx)) continue;
-			if (
-				Math.floor(this.touchSpawnHazardMarginAt(tx, start.y)) <
-				TOUCH_HAZARD_MARGIN_PX
-			) {
-				continue;
-			}
+			if (!this.touchSpawnMeetsQaHazardMargin(tx, start.y)) continue;
 			if (this.touchSpawnOverlapsButtonsAt(tx, start.y, buttons)) {
 				continue;
 			}
-			return { x: Math.round(tx), y: start.y };
+			return this.snapTouchSpawnForQaHazardMargin(
+				{ x: Math.round(tx), y: start.y },
+				clusterMin,
+			);
 		}
 		return null;
 	}
@@ -823,26 +842,23 @@ export class Play extends Scene {
 		if (maxX < clusterMin) {
 			if (
 				!ledgeBlocked(maxX) &&
-				Math.floor(this.touchSpawnHazardMarginAt(maxX, start.y)) >=
-					TOUCH_HAZARD_MARGIN_PX &&
+				this.touchSpawnMeetsQaHazardMargin(maxX, start.y) &&
 				!this.touchSpawnOverlapsButtonsAt(maxX, start.y, buttons)
 			) {
 				return { x: Math.round(maxX), y: start.y };
 			}
 			return { x: start.x, y: start.y };
 		}
-		for (let tx = clusterMin; tx <= maxX; tx += 2) {
+		for (let tx = maxX; tx >= clusterMin; tx -= 2) {
 			if (ledgeBlocked(tx)) continue;
-			if (
-				Math.floor(this.touchSpawnHazardMarginAt(tx, start.y)) <
-				TOUCH_HAZARD_MARGIN_PX
-			) {
-				continue;
-			}
+			if (!this.touchSpawnMeetsQaHazardMargin(tx, start.y)) continue;
 			if (this.touchSpawnOverlapsButtonsAt(tx, start.y, buttons)) {
 				continue;
 			}
-			return { x: Math.round(tx), y: start.y };
+			return this.snapTouchSpawnForQaHazardMargin(
+				{ x: Math.round(tx), y: start.y },
+				clusterMin,
+			);
 		}
 		return { x: start.x, y: start.y };
 	}

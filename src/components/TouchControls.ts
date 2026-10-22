@@ -318,7 +318,7 @@ export class TouchControls {
 
 	/** Smallest layout scale while keeping on-screen targets usable (~30 CSS px). */
 	private minLayoutScale(): number {
-		return 0.62;
+		return 0.5;
 	}
 
 	shrinkLayoutStep(): boolean {
@@ -340,11 +340,14 @@ export class TouchControls {
 	}
 
 	private layoutMetrics() {
+		const widthScale = this.scene.scale.displaySize.width / WIDTH;
 		const displayScale = Math.max(
-			this.scene.scale.displaySize.width / WIDTH,
+			widthScale,
 			this.scene.scale.displaySize.height / HEIGHT,
 		);
-		const touchMinGame = Math.ceil(MIN_TOUCH_CSS_PX / displayScale);
+		// Size gameplay buttons from width so URL-bar height (568×270) does not
+		// inflate the ◀▶ cluster versus 568×320.
+		const touchMinGame = Math.ceil(MIN_TOUCH_CSS_PX / widthScale);
 		const baseSize = Math.max(BASE_BTN_GAME_PX, touchMinGame);
 		const scaledTouch = Math.ceil(
 			touchMinGame * Math.max(this.layoutScale, this.minLayoutScale()),
