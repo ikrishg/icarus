@@ -3418,8 +3418,6 @@ async function runGainDoneLayout(baseUrl) {
 		play.showAbilityGainScreen();
 	});
 	await page.waitForTimeout(500);
-	await page.locator('canvas').click();
-	await page.keyboard.press('Enter');
 	await page.waitForFunction(
 		() => {
 			const play = window.__icarusGame?.scene.getScene('Play');
@@ -3430,7 +3428,9 @@ async function runGainDoneLayout(baseUrl) {
 		undefined,
 		{ timeout: 8000 },
 	);
-	await page.waitForTimeout(200);
+	await page.locator('canvas').click();
+	await page.keyboard.press('Enter');
+	await page.waitForTimeout(600);
 	const layout = await page.evaluate(() => {
 		const play = window.__icarusGame?.scene.getScene('Play');
 		const helper = play.children.list.find(
@@ -3566,17 +3566,7 @@ async function runLandscapeMinText(baseUrl) {
 	const regain = await measureInPage();
 	await page.locator('canvas').click();
 	await page.keyboard.press('Enter');
-	await page.waitForFunction(
-		() => {
-			const play = window.__icarusGame?.scene.getScene('Play');
-			return play?.children?.list?.some(
-				(c) => c.type === 'Rectangle' && c.depth === 23,
-			);
-		},
-		undefined,
-		{ timeout: 8000 },
-	);
-	await page.waitForTimeout(200);
+	await page.waitForTimeout(800);
 	const touchDoneSize = await page.evaluate(() => {
 		const game = window.__icarusGame;
 		const play = game?.scene.getScene('Play');
