@@ -1511,8 +1511,6 @@ async function runTouchSpawnSafety(baseUrl) {
 					}
 				} else if (phase === 'level-restart') {
 					playScene?.restartCurrentLevel?.();
-				} else {
-					playScene?.resetPlayer?.();
 				}
 				await new Promise((r) =>
 					requestAnimationFrame(() => requestAnimationFrame(r)),

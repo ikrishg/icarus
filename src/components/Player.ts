@@ -410,7 +410,9 @@ export class Player {
 			body.setAllowGravity(true);
 			this.sprite.setAngularVelocity(0);
 		}
-		this.sprite.play('player-idle');
+		if (this.sprite.anims?.exists('player-idle')) {
+			this.sprite.play('player-idle');
+		}
 		this.setPosition(x, y);
 	}
 
