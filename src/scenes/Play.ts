@@ -416,6 +416,8 @@ export class Play extends Scene {
 		this.setGameplayHudVisible(false);
 		this.isResetting = true;
 		this.levelManager.setFireballTimersPaused(true);
+		this.time.paused = false;
+		this.time.timeScale = this.gameplayTimeScale || 1;
 		this.sound.play('death', { volume: 0.6 });
 
 		this.runEndedOnDeath = false;
