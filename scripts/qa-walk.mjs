@@ -1274,8 +1274,6 @@ async function runTouchHudChromeOverlapMatrix(baseUrl) {
 						play.handleDisplayResize?.();
 						if (phase === 'restart') {
 							play.restartCurrentLevel?.();
-						} else {
-							play.resetPlayer?.();
 						}
 						play.setGameplayHudVisible(true);
 						play.showLevelInstruction();
