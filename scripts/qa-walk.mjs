@@ -1616,7 +1616,7 @@ async function runTouchSpawnSafety(baseUrl) {
 								hazards.push({ left, right: left + w });
 							}
 						}
-						if (o.type === 'fireball' && start.y <= o.y + 120) {
+						if (o.type === 'fireball' && levelDef.start.y <= o.y + 120) {
 							hazards.push({
 								left: o.x - 27,
 								right: o.x + 27,
