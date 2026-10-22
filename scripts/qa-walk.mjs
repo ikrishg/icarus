@@ -3293,7 +3293,7 @@ async function runPortraitUnfreezeCases(baseUrl) {
 	});
 	await page.waitForTimeout(2000);
 	await page.setViewportSize({ width: 844, height: 390 });
-	await page.waitForTimeout(600);
+	await page.waitForTimeout(1200);
 	await page.waitForFunction(
 		() => {
 			const play = window.__icarusGame?.scene.getScene('Play');
@@ -3301,12 +3301,19 @@ async function runPortraitUnfreezeCases(baseUrl) {
 				play &&
 				!play.isResetting &&
 				!play.player?.isDead &&
-				!play.physics?.world?.isPaused &&
 				!play.isPaused
 			);
 		},
 		undefined,
 		{ timeout: 45000 },
+	);
+	await page.waitForFunction(
+		() => {
+			const play = window.__icarusGame?.scene.getScene('Play');
+			return play && !play.physics?.world?.isPaused;
+		},
+		undefined,
+		{ timeout: 15000 },
 	);
 	await page.locator('canvas').click();
 	const portraitKillRotateCase = await assertUnfrozenAndMoving(page);
