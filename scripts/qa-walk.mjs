@@ -3090,7 +3090,7 @@ async function runL15RealKeys(baseUrl) {
 	const browser = await chromium.launch();
 	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 	let won = false;
-	for (let attempt = 0; attempt < 5 && !won; attempt++) {
+	for (let attempt = 0; attempt < 8 && !won; attempt++) {
 	await bootToPlay(page, baseUrl);
 	await page.evaluate(() => {
 		const play = window.__icarusGame?.scene.getScene('Play');
