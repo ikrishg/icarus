@@ -39,7 +39,8 @@ export function touchChromeMetrics(scene: Scene): TouchChromeMetrics {
 		Math.max(88, Math.ceil(88 / displayScale)),
 	);
 	const chromeGap = Math.max(16, Math.ceil(12 / displayScale));
-	const rowTop = CHROME_ROW_Y;
+	const shortViewport = scene.scale.displaySize.height < 360;
+	const rowTop = CHROME_ROW_Y + (shortViewport ? 6 : 0);
 	const pauseCenterX = margin + chromeW / 2;
 	const pauseCenterY = rowTop + chromeH / 2;
 	const pauseRight = margin + chromeW;

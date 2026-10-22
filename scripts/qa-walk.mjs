@@ -3727,6 +3727,10 @@ async function runTouchUrlBarShrinkAsserts(baseUrl) {
 		await page.evaluate((idx) => window.__icarusPrepareLevel?.(7), 7);
 		await page.setViewportSize(caseDef.shrink);
 		await page.waitForTimeout(650);
+		await page.evaluate(() => {
+			window.__icarusGame?.scene.getScene('Play')?.handleDisplayResize?.();
+		});
+		await page.waitForTimeout(350);
 		const hud = await collectTouchHudOverlap(page);
 		const buttons = await collectTouchButtonOverlap(page);
 		const spawn = await evaluateTouchSpawnClearance(page, 7);

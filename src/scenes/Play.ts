@@ -945,8 +945,35 @@ export class Play extends Scene {
 		this.syncPortraitBlockerPause();
 		this.syncTouchLandscapeSpawnIfNeeded();
 		if (!this.isResetting && !this.player?.isDead) {
+			this.repositionTouchSpawnIfOverlappingButtons();
 			this.schedulePushClearOfTouchButtons();
 		}
+	}
+
+	private repositionTouchSpawnIfOverlappingButtons(): void {
+		if (!this.touchControls?.visible || !this.player?.sprite?.body) return;
+		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
+		const buttons = this.touchGameplayButtons();
+		if (buttons.length === 0) return;
+		const sprite = this.player.sprite;
+		const sprB = sprite.getBounds();
+		const spriteHalfW = (sprB.right - sprB.left) / 2;
+		const spriteHalfH = (sprB.bottom - sprB.top) / 2;
+		const startY = this.levelManager.current.start.y;
+		if (
+			!spriteOverlapsButtons(
+				sprite.x,
+				startY,
+				spriteHalfW,
+				spriteHalfH,
+				buttons,
+			)
+		) {
+			return;
+		}
+		const pos = this.resolveTouchSpawnPlacement();
+		this.player.sprite.setPosition(pos.x, pos.y);
+		body.updateFromGameObject();
 	}
 
 	private schedulePushClearOfTouchButtons(): void {
