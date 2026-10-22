@@ -787,7 +787,15 @@ export class Play extends Scene {
 		this.touchControls?.relayout();
 		this.relayoutTouchChromeHud();
 		this.relayoutLevelInstructionIfVisible();
-		this.syncPortraitBlockerPause();
+		if (
+			isTouchDevice(this) &&
+			!isPortraitBlockerActive() &&
+			this.portraitBlockerPauseActive
+		) {
+			this.syncPortraitBlockerPause();
+		} else {
+			this.syncPortraitBlockerPause();
+		}
 		this.syncTouchLandscapeSpawnIfNeeded();
 		if (!this.isResetting && !this.player?.isDead) {
 			this.schedulePushClearOfTouchButtons();
