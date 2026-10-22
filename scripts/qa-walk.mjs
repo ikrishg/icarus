@@ -2370,6 +2370,7 @@ async function resetPlayLevel(page, levelIdx = 0) {
 	await page.evaluate((levelIdx) => {
 		window.__icarusPrepareLevel?.(levelIdx);
 		const play = window.__icarusGame?.scene.getScene('Play');
+		play?.abilityManager?.reset?.();
 		play?.resetPlayer?.();
 		play?.syncPortraitBlockerPause?.();
 		const body = play?.player?.sprite?.body;
@@ -3017,8 +3018,6 @@ async function runFireballFirstSpawnTiming(baseUrl) {
 	});
 	await bootToPlay(page, baseUrl);
 	const firstEntry = await page.evaluate(async () => {
-		window.__icarusPrepareLevel?.(5);
-		await new Promise((r) => setTimeout(r, 80));
 		window.__icarusPrepareLevel?.(5);
 		const play = window.__icarusGame?.scene.getScene('Play');
 		await new Promise((r) =>
