@@ -770,11 +770,9 @@ export class Play extends Scene {
 			spawnY,
 		)) {
 			const capped = h.left - TOUCH_HAZARD_MARGIN_PX - spriteHalfW;
-			if (capped >= clusterMin) {
-				maxX = Math.min(maxX, capped);
-			}
+			maxX = Math.min(maxX, capped);
 		}
-		return Math.max(maxX, clusterMin);
+		return maxX;
 	}
 
 	private pickTouchSpawnAtCurrentLayout(
