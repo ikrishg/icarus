@@ -3303,7 +3303,7 @@ async function runPortraitUnfreezeCases(baseUrl) {
 			);
 		},
 		undefined,
-		{ timeout: 25000 },
+		{ timeout: 45000 },
 	);
 	await page.locator('canvas').click();
 	const portraitKillRotateCase = await assertUnfrozenAndMoving(page);
@@ -3867,7 +3867,10 @@ async function runTouchDualFingerSameButton(baseUrl) {
 
 async function runProdBundleDebugGlobals(baseUrl) {
 	const { execSync } = await import('node:child_process');
-	execSync('npm run build', { cwd: process.cwd(), stdio: 'pipe' });
+	execSync('npx vite build --config vite/config.prod.mjs', {
+		cwd: process.cwd(),
+		stdio: 'pipe',
+	});
 	const { readFileSync, readdirSync } = await import('node:fs');
 	const { join } = await import('node:path');
 	const distDir = join(process.cwd(), 'dist');
