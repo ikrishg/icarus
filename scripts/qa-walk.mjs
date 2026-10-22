@@ -1495,11 +1495,30 @@ async function runTouchSpawnSafety(baseUrl) {
 				window.__icarusPrepareLevel?.(idx);
 				const playScene = window.__icarusGame?.scene.getScene('Play');
 				playScene?.handleDisplayResize?.();
-				if (phase === 'level-restart') {
-					playScene?.restartCurrentLevel?.();
-				} else if (phase === 'death-respawn') {
+				if (phase === 'death-respawn') {
 					playScene?.killPlayer?.('fall', { fast: true, spendLife: false });
-					await new Promise((r) => setTimeout(r, 1200));
+					for (let t = 0; t < 120; t++) {
+						await new Promise((r) => setTimeout(r, 50));
+						if (
+							playScene &&
+							!playScene.isResetting &&
+							!playScene.player?.isDead
+						) {
+							break;
+						}
+					}
+				} else if (phase === 'level-restart') {
+					for (let t = 0; t < 120; t++) {
+						await new Promise((r) => setTimeout(r, 50));
+						if (
+							playScene &&
+							!playScene.isResetting &&
+							!playScene.player?.isDead
+						) {
+							break;
+						}
+					}
+					playScene?.restartCurrentLevel?.();
 				} else {
 					playScene?.resetPlayer?.();
 				}
