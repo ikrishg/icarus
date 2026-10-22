@@ -3932,6 +3932,12 @@ async function main() {
 	const allOpeningRoutesOk = openingRoutes.every((row) => row.ok);
 	const daedalusRoute = openingRoutes.find((row) => row.name === 'Daedalus Interlude');
 	const { server, baseUrl } = await startStaticServer();
+	if (process.env.QA_TOUCH_SPAWN_ONLY === '1') {
+		const touchSpawn = await runTouchSpawnSafety(baseUrl);
+		server.close();
+		console.log(JSON.stringify({ touchSpawn }, null, 2));
+		process.exit(touchSpawn.touchSpawnOk ? 0 : 1);
+	}
 	const pause = await runPauseEscToggle(baseUrl);
 	const desktop = await runDesktop(baseUrl);
 	const debug = await runDebugCheat(baseUrl);
