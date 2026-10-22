@@ -28,15 +28,23 @@ export function touchChromeMetrics(scene: Scene): TouchChromeMetrics {
 	);
 	const margin = Math.max(
 		BASE_MARGIN_GAME_PX,
-		Math.ceil(BASE_MARGIN_GAME_PX / displayScale),
+		Math.min(48, Math.ceil(BASE_MARGIN_GAME_PX / displayScale)),
 	);
-	const chromeH = Math.max(48, Math.ceil(MIN_TOUCH_CSS_PX / displayScale));
-	const chromeW = Math.max(96, Math.ceil(88 / displayScale));
-	const chromeGap = Math.max(12, Math.ceil(8 / displayScale));
+	const chromeH = Math.min(
+		52,
+		Math.max(44, Math.ceil(MIN_TOUCH_CSS_PX / displayScale)),
+	);
+	const chromeW = Math.min(
+		112,
+		Math.max(88, Math.ceil(88 / displayScale)),
+	);
+	const chromeGap = Math.max(16, Math.ceil(12 / displayScale));
+	const rowTop = CHROME_ROW_Y;
 	const pauseCenterX = margin + chromeW / 2;
-	const pauseCenterY = CHROME_ROW_Y + chromeH / 2;
-	const livesTextX = margin + chromeW + chromeGap;
-	const livesTextY = pauseCenterY - LIVES_LABEL_HEIGHT_GAME_PX / 2;
+	const pauseCenterY = rowTop + chromeH / 2;
+	const pauseRight = margin + chromeW;
+	const livesTextX = pauseRight + chromeGap;
+	const livesTextY = rowTop + (chromeH - LIVES_LABEL_HEIGHT_GAME_PX) / 2;
 	const hudStackBottom = Math.max(
 		pauseCenterY + chromeH / 2,
 		livesTextY + LIVES_LABEL_HEIGHT_GAME_PX,

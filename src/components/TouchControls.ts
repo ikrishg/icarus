@@ -323,9 +323,9 @@ export class TouchControls {
 		);
 		const minScale =
 			(MIN_TOUCH_CSS_PX / displayScale) / BASE_BTN_GAME_PX;
-		const next = this.layoutScale - 0.06;
-		if (next < minScale) {
-			this.layoutScale = minScale;
+		const next = this.layoutScale - 0.05;
+		if (next < minScale * 0.92) {
+			this.layoutScale = minScale * 0.92;
 			return false;
 		}
 		this.layoutScale = next;

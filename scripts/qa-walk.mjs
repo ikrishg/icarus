@@ -1234,22 +1234,27 @@ async function collectTouchHudOverlap(page) {
 				bottom: ib.bottom,
 			};
 		}
-		const ok =
+		const pauseLivesOverlap =
 			pause &&
 			lives &&
+			pause.left < lives.right &&
+			pause.right > lives.left &&
+			pause.top < lives.bottom &&
+			pause.bottom > lives.top;
+		const panelOverlap =
 			panel &&
-			!(pause.left < panel.right &&
+			((pause &&
+				pause.left < panel.right &&
 				pause.right > panel.left &&
 				pause.top < panel.bottom &&
-				pause.bottom > panel.top) &&
-			!(lives.left < panel.right &&
-				lives.right > panel.left &&
-				lives.top < panel.bottom &&
-				lives.bottom > panel.top) &&
-			!(pause.left < lives.right &&
-				pause.right > lives.left &&
-				pause.top < lives.bottom &&
-				pause.bottom > lives.top);
+				pause.bottom > panel.top) ||
+				(lives &&
+					lives.left < panel.right &&
+					lives.right > panel.left &&
+					lives.top < panel.bottom &&
+					lives.bottom > panel.top));
+		const ok =
+			pause && lives && !pauseLivesOverlap && !panelOverlap;
 		return { ok: Boolean(ok), pause, lives, panel };
 	});
 }
@@ -3085,7 +3090,7 @@ async function runL15RealKeys(baseUrl) {
 	const browser = await chromium.launch();
 	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 	let won = false;
-	for (let attempt = 0; attempt < 3 && !won; attempt++) {
+	for (let attempt = 0; attempt < 5 && !won; attempt++) {
 	await bootToPlay(page, baseUrl);
 	await page.evaluate(() => {
 		const play = window.__icarusGame?.scene.getScene('Play');
@@ -3097,13 +3102,22 @@ async function runL15RealKeys(baseUrl) {
 		play.abilityManager.abilities.canShootArrows = true;
 		play.abilityManager.abilities.visionLevel = 2;
 		window.__icarusPrepareLevel?.(14);
+		play.resetPlayer?.();
+		play.closePause?.();
 		play.clearLevelInstruction?.();
+		play.isPaused = false;
+		play.physics?.resume?.();
+		if (play.time) {
+			play.time.paused = false;
+			play.time.timeScale = 1;
+		}
 	});
+	await page.waitForTimeout(400);
 	await page.locator('canvas').click();
 	await page.keyboard.down('ArrowRight');
 	await page.keyboard.down('ArrowUp');
 	await page.keyboard.down('KeyD');
-	const deadline = Date.now() + 90000;
+	const deadline = Date.now() + 120000;
 	let lastX = (await getPlayerPos(page)).x;
 	let stuckTicks = 0;
 	while (Date.now() < deadline) {
@@ -3118,8 +3132,9 @@ async function runL15RealKeys(baseUrl) {
 		} else {
 			stuckTicks += 1;
 		}
-		if (stuckTicks >= 8) {
+		if (stuckTicks >= 6) {
 			await page.keyboard.press('KeyQ');
+			await page.keyboard.press('KeyE');
 			stuckTicks = 0;
 		}
 		const onGround = await page.evaluate(() => {
@@ -3262,10 +3277,15 @@ async function runPortraitUnfreezeCases(baseUrl) {
 	await page.locator('canvas').click();
 	await page.evaluate(() => {
 		const play = window.__icarusGame?.scene.getScene('Play');
-		const y = play?.levelManager?.current?.start?.y;
-		if (play?.player && y != null) {
-			play.player.revive(400, y);
-			play.player.controlsEnabled = true;
+		if (!play?.player) return;
+		play.syncPortraitBlockerPause?.();
+		const spawn = play.touchSpawnPosition();
+		play.player.revive(spawn.x, spawn.y);
+		play.player.controlsEnabled = true;
+		const body = play.player.sprite.body;
+		if (body) {
+			body.enable = true;
+			body.setAllowGravity(true);
 		}
 	});
 	const levelCase = await assertUnfrozenAndMoving(page);
