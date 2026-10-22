@@ -303,15 +303,20 @@ export class LevelManager {
 						enemy.setFlipX(!enemy.flipX); // Flip sprite direction
 					},
 				});
-			} else if (o.type === 'fireball') {
-				if (!this.deferLevelClockReset) {
-					this.addFireballTimer(o);
-				}
 			}
 		});
 
 		if (!this.deferLevelClockReset) {
-			this.levelStartedAt = this.scene.time.now;
+			this.commitFireballSpawnSchedule();
+		}
+	}
+
+	private commitFireballSpawnSchedule(): void {
+		this.levelStartedAt = this.scene.time.now;
+		for (const o of this.current.obstacles) {
+			if (o.type === 'fireball') {
+				this.addFireballTimer(o);
+			}
 		}
 	}
 
@@ -319,12 +324,7 @@ export class LevelManager {
 	applyDeferredLevelStartClock(): void {
 		if (!this.deferLevelClockReset) return;
 		this.deferLevelClockReset = false;
-		this.levelStartedAt = this.scene.time.now;
-		for (const o of this.current.obstacles) {
-			if (o.type === 'fireball') {
-				this.addFireballTimer(o);
-			}
-		}
+		this.commitFireballSpawnSchedule();
 	}
 
 	private addFireballTimer(o: ObstacleDef & { type: 'fireball' }): void {
