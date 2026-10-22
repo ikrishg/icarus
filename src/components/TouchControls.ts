@@ -316,17 +316,20 @@ export class TouchControls {
 		this.layoutScale = 1;
 	}
 
+	/** Smallest layout scale while keeping on-screen targets usable (~30 CSS px). */
+	private minLayoutScale(): number {
+		return 0.62;
+	}
+
 	shrinkLayoutStep(): boolean {
-		const displayScale = Math.max(
-			this.scene.scale.displaySize.width / WIDTH,
-			this.scene.scale.displaySize.height / HEIGHT,
-		);
-		const minScale =
-			(MIN_TOUCH_CSS_PX / displayScale) / BASE_BTN_GAME_PX;
+		const floor = this.minLayoutScale();
 		const next = this.layoutScale - 0.07;
-		if (next < minScale * 0.92) {
-			this.layoutScale = minScale * 0.92;
-			return false;
+		if (next < floor) {
+			if (this.layoutScale <= floor) {
+				return false;
+			}
+			this.layoutScale = floor;
+			return true;
 		}
 		this.layoutScale = next;
 		return true;
@@ -341,12 +344,13 @@ export class TouchControls {
 			this.scene.scale.displaySize.width / WIDTH,
 			this.scene.scale.displaySize.height / HEIGHT,
 		);
-		const baseSize = Math.max(
-			BASE_BTN_GAME_PX,
-			Math.ceil(MIN_TOUCH_CSS_PX / displayScale),
+		const touchMinGame = Math.ceil(MIN_TOUCH_CSS_PX / displayScale);
+		const baseSize = Math.max(BASE_BTN_GAME_PX, touchMinGame);
+		const scaledTouch = Math.ceil(
+			touchMinGame * Math.max(this.layoutScale, this.minLayoutScale()),
 		);
 		const size = Math.max(
-			Math.ceil(MIN_TOUCH_CSS_PX / displayScale),
+			scaledTouch,
 			Math.floor(baseSize * this.layoutScale),
 		);
 		const margin = Math.max(

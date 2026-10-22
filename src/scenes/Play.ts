@@ -36,8 +36,6 @@ import {
 	type ButtonRect,
 } from '../util/touchSafeX';
 
-/** Placement uses a hair above QA's 96px assert to absorb bounds rounding. */
-const TOUCH_SPAWN_HAZARD_MIN_PX = TOUCH_HAZARD_MARGIN_PX + 2;
 import { isDebugPlayEnabled } from '../util/debug';
 
 import { sanitizePixelFont } from '../util/text';
@@ -721,6 +719,7 @@ export class Play extends Scene {
 		body.updateFromGameObject();
 		let blocked = false;
 		const playerBounds = this.player.sprite.getBounds();
+		const footTop = playerBounds.bottom - Math.min(32, playerBounds.height * 0.35);
 		for (const child of this.levelManager.platforms.getChildren()) {
 			const platBody = (child as Phaser.GameObjects.GameObject).body as
 				| Phaser.Physics.Arcade.StaticBody
@@ -730,7 +729,7 @@ export class Play extends Scene {
 				playerBounds.right > platBody.left &&
 				playerBounds.left < platBody.right &&
 				playerBounds.bottom > platBody.top &&
-				playerBounds.top < platBody.bottom
+				footTop < platBody.bottom
 			) {
 				blocked = true;
 				break;
@@ -772,15 +771,13 @@ export class Play extends Scene {
 			this.levelManager.current,
 			spawnY,
 		)) {
-			const capped = h.left - TOUCH_SPAWN_HAZARD_MIN_PX - spriteHalfW;
+			const capped = h.left - TOUCH_HAZARD_MARGIN_PX - spriteHalfW;
 			maxX = Math.min(maxX, capped);
 		}
 		return maxX;
 	}
 
-	private pickTouchSpawnAtCurrentLayout(
-		allowButtonOverlap = false,
-	): { x: number; y: number } | null {
+	private pickTouchSpawnAtCurrentLayout(): { x: number; y: number } | null {
 		const start = this.levelManager.current.start;
 		if (!this.touchControls?.visible || !this.player?.sprite?.body) {
 			return null;
@@ -795,28 +792,18 @@ export class Play extends Scene {
 			return null;
 		}
 		const buttons = this.touchGameplayButtons();
-		let hazardOverlapFallback: number | null = null;
 		for (let tx = clusterMin; tx <= maxX; tx += 2) {
 			if (ledgeBlocked(tx)) continue;
 			if (
 				this.touchSpawnHazardMarginAt(tx, start.y) <
-				TOUCH_SPAWN_HAZARD_MIN_PX
+				TOUCH_HAZARD_MARGIN_PX
 			) {
 				continue;
 			}
 			if (this.touchSpawnOverlapsButtonsAt(tx, start.y, buttons)) {
-				if (allowButtonOverlap && hazardOverlapFallback == null) {
-					hazardOverlapFallback = tx;
-				}
 				continue;
 			}
 			return { x: Math.round(tx), y: start.y };
-		}
-		if (allowButtonOverlap && hazardOverlapFallback != null) {
-			return {
-				x: Math.round(hazardOverlapFallback),
-				y: start.y,
-			};
 		}
 		return null;
 	}
@@ -829,11 +816,13 @@ export class Play extends Scene {
 		const maxX = this.touchSpawnSearchMaxX(spriteHalfW);
 		const ledgeBlocked = (tx: number) =>
 			this.touchSpawnBlockedAt(tx, start.y);
+		const buttons = this.touchGameplayButtons();
 		if (maxX < clusterMin) {
 			if (
 				!ledgeBlocked(maxX) &&
 				this.touchSpawnHazardMarginAt(maxX, start.y) >=
-					TOUCH_HAZARD_MARGIN_PX
+					TOUCH_HAZARD_MARGIN_PX &&
+				!this.touchSpawnOverlapsButtonsAt(maxX, start.y, buttons)
 			) {
 				return { x: Math.round(maxX), y: start.y };
 			}
@@ -842,16 +831,17 @@ export class Play extends Scene {
 		for (let tx = clusterMin; tx <= maxX; tx += 2) {
 			if (ledgeBlocked(tx)) continue;
 			if (
-				this.touchSpawnHazardMarginAt(tx, start.y) >=
-				TOUCH_SPAWN_HAZARD_MIN_PX
+				this.touchSpawnHazardMarginAt(tx, start.y) <
+				TOUCH_HAZARD_MARGIN_PX
 			) {
-				return { x: Math.round(tx), y: start.y };
+				continue;
 			}
+			if (this.touchSpawnOverlapsButtonsAt(tx, start.y, buttons)) {
+				continue;
+			}
+			return { x: Math.round(tx), y: start.y };
 		}
-		return {
-			x: Math.round(Math.max(start.x, clusterMin)),
-			y: start.y,
-		};
+		return { x: start.x, y: start.y };
 	}
 
 	resolveTouchSpawnPlacement(): { x: number; y: number } {
@@ -864,7 +854,7 @@ export class Play extends Scene {
 		}
 		this.refreshTouchSpawnLayout();
 		for (let attempt = 0; attempt < 36; attempt++) {
-			const pos = this.pickTouchSpawnAtCurrentLayout(false);
+			const pos = this.pickTouchSpawnAtCurrentLayout();
 			if (pos) {
 				return pos;
 			}
@@ -873,13 +863,9 @@ export class Play extends Scene {
 			}
 			this.touchControls.relayout();
 		}
-		const strict = this.pickTouchSpawnAtCurrentLayout(false);
-		if (strict) {
-			return strict;
-		}
-		const relaxed = this.pickTouchSpawnAtCurrentLayout(true);
-		if (relaxed) {
-			return relaxed;
+		const pos = this.pickTouchSpawnAtCurrentLayout();
+		if (pos) {
+			return pos;
 		}
 		return this.touchSpawnFallbackPosition();
 	}
@@ -893,10 +879,10 @@ export class Play extends Scene {
 		if (!this.player?.sprite?.body) {
 			return { x: start.x, y: start.y };
 		}
-		const pos =
-			this.pickTouchSpawnAtCurrentLayout(false) ??
-			this.pickTouchSpawnAtCurrentLayout(true);
-		return pos ?? this.touchSpawnFallbackPosition();
+		return (
+			this.pickTouchSpawnAtCurrentLayout() ??
+			this.touchSpawnFallbackPosition()
+		);
 	}
 
 	resetPlayer() {
@@ -998,8 +984,7 @@ export class Play extends Scene {
 			return;
 		}
 
-		const pos = this.pickTouchSpawnAtCurrentLayout();
-		if (!pos) return;
+		const pos = this.resolveTouchSpawnPlacement();
 		this.player.sprite.setPosition(pos.x, pos.y);
 		body.updateFromGameObject();
 	}

@@ -1671,7 +1671,7 @@ async function evaluateTouchSpawnClearance(page, levelIdx) {
 		const play = window.__icarusGame?.scene.getScene('Play');
 		if (!play?.touchControls?.visible) return { ok: true, skip: true };
 		window.__icarusPrepareLevel?.(idx);
-		play.resetPlayer?.();
+		play.handleDisplayResize?.();
 		return new Promise((resolve) => {
 			requestAnimationFrame(() => {
 				requestAnimationFrame(() => {
@@ -3091,7 +3091,7 @@ async function runL15RealKeys(baseUrl) {
 	const browser = await chromium.launch();
 	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 	let won = false;
-	for (let attempt = 0; attempt < 8 && !won; attempt++) {
+	for (let attempt = 0; attempt < 5 && !won; attempt++) {
 	await bootToPlay(page, baseUrl);
 	await page.evaluate(() => {
 		const play = window.__icarusGame?.scene.getScene('Play');
@@ -3103,7 +3103,6 @@ async function runL15RealKeys(baseUrl) {
 		play.abilityManager.abilities.canShootArrows = true;
 		play.abilityManager.abilities.visionLevel = 2;
 		window.__icarusPrepareLevel?.(14);
-		play.resetPlayer?.();
 		play.closePause?.();
 		play.clearLevelInstruction?.();
 		play.isPaused = false;
