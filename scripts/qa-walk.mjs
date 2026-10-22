@@ -1480,7 +1480,7 @@ async function runTouchSpawnSafety(baseUrl) {
 		});
 		await bootToPlay(page, baseUrl);
 		for (let level = 0; level < 15; level++) {
-			for (const phase of ['level-entry', 'death-respawn', 'level-restart']) {
+			for (const phase of ['level-entry', 'level-restart', 'death-respawn']) {
 			const result = await page.evaluate(async ({ idx, phase, vpWidth, spawnPad }) => {
 				const spriteOverlapsButtons = (playerRect, buttons) =>
 					buttons.some(
