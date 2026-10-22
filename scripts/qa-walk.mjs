@@ -3195,16 +3195,16 @@ async function runL15RealKeys(baseUrl) {
 			stuckTicks = 0;
 		}
 		const y = (await getPlayerPos(page)).y;
-		if (x > 1500 && y > 360) {
+		if (x > 1350 && x < 1780 && y > 420) {
 			await page.keyboard.up('ArrowRight');
-			for (let burst = 0; burst < 10; burst++) {
+			await page.keyboard.down('ArrowUp');
+			for (let burst = 0; burst < 12; burst++) {
 				await page.keyboard.press('Space');
-				await page.waitForTimeout(120);
+				await page.waitForTimeout(100);
 				await page.keyboard.press('KeyQ');
-				await page.waitForTimeout(120);
+				await page.waitForTimeout(100);
 			}
 			await page.keyboard.down('ArrowRight');
-			await page.keyboard.down('ArrowUp');
 		}
 		const onGround = await page.evaluate(() => {
 			const body =
@@ -3436,6 +3436,7 @@ async function runGainDoneLayout(baseUrl) {
 	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 	await bootToPlay(page, baseUrl);
 	await page.evaluate(() => {
+		window.__icarusHoldAbilityCards = true;
 		const play = window.__icarusGame?.scene.getScene('Play');
 		play.abilityManager.abilities.jumpLevel = 1;
 		play.abilityManager.abilities.dashLevel = 1;
@@ -3464,6 +3465,7 @@ async function runGainDoneLayout(baseUrl) {
 		const doneBg = play.children.list.find(
 			(c) => c.type === 'Rectangle' && c.depth === 23,
 		);
+		delete window.__icarusHoldAbilityCards;
 		if (!helper?.getBounds || !doneBg?.getBounds) {
 			return { gainDoneLayoutOk: false, reason: 'missing-nodes' };
 		}
@@ -3575,6 +3577,7 @@ async function runLandscapeMinText(baseUrl) {
 	await page.waitForTimeout(400);
 	const loss = await measureInPage();
 	await page.evaluate(() => {
+		window.__icarusHoldAbilityCards = true;
 		const play = window.__icarusGame?.scene.getScene('Play');
 		play.children.list
 			.filter((c) => {
@@ -3590,10 +3593,7 @@ async function runLandscapeMinText(baseUrl) {
 	await page.waitForTimeout(400);
 	const regain = await measureInPage();
 	await page.locator('canvas').click();
-	for (let i = 0; i < 4; i++) {
-		await page.keyboard.press('Enter');
-		await page.waitForTimeout(280);
-	}
+	await page.keyboard.press('Enter');
 	await page.waitForTimeout(400);
 	const touchDoneSize = await page.evaluate(() => {
 		const game = window.__icarusGame;
@@ -3607,6 +3607,7 @@ async function runLandscapeMinText(baseUrl) {
 		const scale = game.scale.displaySize.width / game.scale.width;
 		const b = doneBg.getBounds();
 		const cssHeight = b.height * scale;
+		delete window.__icarusHoldAbilityCards;
 		return { cssHeight, ok: cssHeight >= 44 };
 	});
 	await page.evaluate(() => {
