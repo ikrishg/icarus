@@ -228,6 +228,9 @@ export class Play extends Scene {
 						const spawn = this.resolveTouchSpawnPlacement();
 						this.player.revive(spawn.x, spawn.y);
 						this.setupLevelColliders();
+						if (this.touchControls?.visible) {
+							this.repositionTouchSpawnIfOverlappingButtons();
+						}
 						return true;
 					} finally {
 						if (wasPaused) {
@@ -795,7 +798,7 @@ export class Play extends Scene {
 		for (let tx = clusterMin; tx <= maxX; tx += 2) {
 			if (ledgeBlocked(tx)) continue;
 			if (
-				this.touchSpawnHazardMarginAt(tx, start.y) <
+				Math.floor(this.touchSpawnHazardMarginAt(tx, start.y)) <
 				TOUCH_HAZARD_MARGIN_PX
 			) {
 				continue;
@@ -820,7 +823,7 @@ export class Play extends Scene {
 		if (maxX < clusterMin) {
 			if (
 				!ledgeBlocked(maxX) &&
-				this.touchSpawnHazardMarginAt(maxX, start.y) >=
+				Math.floor(this.touchSpawnHazardMarginAt(maxX, start.y)) >=
 					TOUCH_HAZARD_MARGIN_PX &&
 				!this.touchSpawnOverlapsButtonsAt(maxX, start.y, buttons)
 			) {
@@ -831,7 +834,7 @@ export class Play extends Scene {
 		for (let tx = clusterMin; tx <= maxX; tx += 2) {
 			if (ledgeBlocked(tx)) continue;
 			if (
-				this.touchSpawnHazardMarginAt(tx, start.y) <
+				Math.floor(this.touchSpawnHazardMarginAt(tx, start.y)) <
 				TOUCH_HAZARD_MARGIN_PX
 			) {
 				continue;
