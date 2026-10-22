@@ -711,15 +711,7 @@ export class Play extends Scene {
 		let x = start.x;
 		for (let attempt = 0; attempt < 14; attempt++) {
 			const clusterMin = this.touchControls.getMinSpawnX(spriteHalfW);
-			const maxX = Math.min(
-				WIDTH - spriteHalfW,
-				Math.max(
-					start.x + TOUCH_SPAWN_MAX_DELTA_FROM_START,
-					clusterMin + TOUCH_SPAWN_MAX_DELTA_FROM_START,
-					clusterMin + 8,
-					start.x + 260,
-				),
-			);
+			const maxX = WIDTH - spriteHalfW;
 			const safe = findSafeTouchCenterX({
 				startX: start.x,
 				clusterMinX: clusterMin,
