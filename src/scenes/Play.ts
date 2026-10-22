@@ -421,7 +421,10 @@ export class Play extends Scene {
 			this.relayoutTouchChromeHud();
 			this.setGameplayHudVisible(true);
 			this.isResetting = false;
-			this.levelManager.levelStartedAt = this.time.now;
+			if (this.levelManager.deferLevelClockReset) {
+				this.levelManager.levelStartedAt = this.time.now;
+				this.levelManager.deferLevelClockReset = false;
+			}
 			if (isPortraitBlockerActive()) {
 				this.portraitBlockerPauseActive = true;
 				this.isPaused = true;
@@ -749,10 +752,29 @@ export class Play extends Scene {
 			clusterMin - start.x,
 			clusterMin + 72 - start.x,
 		);
-		return Math.min(
+		const boundMax = Math.min(
 			WIDTH - spriteHalfW,
 			Math.max(start.x + maxDelta, clusterMin + 72),
 		);
+		return Math.min(boundMax, this.touchSpawnHazardMaxCenterX(spriteHalfW, start.y));
+	}
+
+	private touchSpawnHazardMaxCenterX(
+		spriteHalfW: number,
+		spawnY: number,
+	): number {
+		const clusterMin = this.touchControls!.getMinSpawnX(spriteHalfW);
+		let maxX = WIDTH - spriteHalfW;
+		for (const h of hazardIntervalsForLevel(
+			this.levelManager.current,
+			spawnY,
+		)) {
+			const capped = h.left - TOUCH_HAZARD_MARGIN_PX - spriteHalfW;
+			if (capped >= clusterMin) {
+				maxX = Math.min(maxX, capped);
+			}
+		}
+		return Math.max(maxX, clusterMin);
 	}
 
 	private pickTouchSpawnAtCurrentLayout(

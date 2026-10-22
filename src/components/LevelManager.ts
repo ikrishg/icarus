@@ -24,6 +24,8 @@ export class LevelManager {
 	fireballTimers: Phaser.Time.TimerEvent[] = [];
 	lavaTimers: Phaser.Time.TimerEvent[] = [];
 	levelStartedAt = 0;
+	/** When true, Play resets levelStartedAt when death reset finishes. */
+	deferLevelClockReset = false;
 	private hudObjects: Phaser.GameObjects.GameObject[] = [];
 
 	getHudTitle(): Phaser.GameObjects.Text | undefined {
@@ -109,7 +111,15 @@ export class LevelManager {
 		this.lavaTimers = [];
 
 		const level = this.current;
-		this.levelStartedAt = this.scene.time.now;
+		const play = this.scene.scene.get('Play') as
+			| { isResetting?: boolean }
+			| undefined;
+		if (play?.isResetting) {
+			this.deferLevelClockReset = true;
+		} else {
+			this.levelStartedAt = this.scene.time.now;
+			this.deferLevelClockReset = false;
+		}
 
 		const touch = isTouchDevice(this.scene);
 		const chrome = touch ? touchChromeMetrics(this.scene) : null;

@@ -44,7 +44,7 @@ export function touchChromeMetrics(scene: Scene): TouchChromeMetrics {
 	const pauseCenterY = rowTop + chromeH / 2;
 	const pauseRight = margin + chromeW;
 	const stackLivesBelow =
-		scene.scale.displaySize.height / HEIGHT < 0.31;
+		scene.scale.displaySize.height / HEIGHT < 0.33;
 	const livesTextX = stackLivesBelow ? margin : pauseRight + chromeGap;
 	const livesTextY = stackLivesBelow
 		? rowTop + chromeH + chromeGap
