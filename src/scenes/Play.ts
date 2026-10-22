@@ -12,7 +12,6 @@ import {
 	WIDTH,
 } from '../util/constants';
 import { DeathSequence, type DeathCause } from '../components/DeathSequence';
-import { isDebugPlayEnabled } from '../util/debug';
 import {
 	ABILITY_LOSS_LINE,
 	ABILITY_MYTH_NAME,
@@ -29,14 +28,16 @@ import {
 	touchChromeMetrics,
 	touchInstructionPanelCenterY,
 } from '../util/touchLayout';
+import {
+	findSafeTouchCenterX,
+	spriteOverlapsButtons,
+	touchSpawnHazardClearAt,
+	type ButtonRect,
+} from '../util/touchSafeX';
+import { isDebugPlayEnabled } from '../util/debug';
 
 /** Max touch spawn offset from authored start (buttons are translucent). */
 const TOUCH_SPAWN_MAX_DELTA_FROM_START = 72;
-
-/** Hazard exclusivity window ahead of spawn: player body width + 100px. */
-function touchHazardWindowPx(bodyHalfWidth: number): number {
-	return bodyHalfWidth * 2 + 100;
-}
 
 import { sanitizePixelFont } from '../util/text';
 
@@ -138,6 +139,8 @@ export class Play extends Scene {
 	private portraitBlockerPauseActive = false;
 	private pendingTouchLandscapeSpawn = false;
 	private runEndedOnDeath = false;
+	private resizePushGeneration = 0;
+	private resizePushTimer?: Phaser.Time.TimerEvent;
 
 	constructor() {
 		super('Play');
@@ -205,38 +208,40 @@ export class Play extends Scene {
 		this.createLivesHud();
 		window.__icarusGetColliders = () => this.colliders.length;
 		window.__icarusGetLives = () => this.lives;
-		window.__icarusTouchChromeMetrics = () => touchChromeMetrics(this);
-		window.__icarusPrepareLevel = (levelIndex: number) => {
-			try {
-				if (!this.scene?.isActive() || !this.player || !this.physics?.world) {
+		if (import.meta.env.DEV || import.meta.env.VITE_ENABLE_QA_HOOKS === 'true') {
+			window.__icarusTouchChromeMetrics = () => touchChromeMetrics(this);
+			window.__icarusPrepareLevel = (levelIndex: number) => {
+				try {
+					if (!this.scene?.isActive() || !this.player || !this.physics?.world) {
+						return false;
+					}
+					const world = this.physics.world;
+					const wasPaused = world.isPaused;
+					if (!wasPaused) {
+						world.pause();
+					}
+					try {
+						this.clearLevelInstruction();
+						this.clearColliders();
+						this.isResetting = false;
+						this.pendingTouchLandscapeSpawn = false;
+						this.player.isDead = false;
+						this.player.controlsEnabled = true;
+						this.levelManager.goto(levelIndex);
+						const spawn = this.touchSpawnPosition();
+						this.player.revive(spawn.x, spawn.y);
+						this.setupLevelColliders();
+						return true;
+					} finally {
+						if (!wasPaused) {
+							world.resume();
+						}
+					}
+				} catch {
 					return false;
 				}
-				const world = this.physics.world;
-				const wasPaused = world.isPaused;
-				if (!wasPaused) {
-					world.pause();
-				}
-				try {
-					this.clearLevelInstruction();
-					this.clearColliders();
-					this.isResetting = false;
-					this.pendingTouchLandscapeSpawn = false;
-					this.player.isDead = false;
-					this.player.controlsEnabled = true;
-					this.levelManager.goto(levelIndex);
-					const spawn = this.touchSpawnPosition();
-					this.player.revive(spawn.x, spawn.y);
-					this.setupLevelColliders();
-					return true;
-				} finally {
-					if (!wasPaused) {
-						world.resume();
-					}
-				}
-			} catch {
-				return false;
-			}
-		};
+			};
+		}
 		this.playBattleMusic();
 		this.showLevelInstruction();
 
@@ -309,6 +314,7 @@ export class Play extends Scene {
 		delete window.__icarusGetColliders;
 		delete window.__icarusGetLives;
 		delete window.__icarusPrepareLevel;
+		delete window.__icarusTouchChromeMetrics;
 	}
 
 	update() {
@@ -324,7 +330,7 @@ export class Play extends Scene {
 				if (!this.deathSequence?.isEscBlocked()) {
 					this.setGameplayClockPaused(true);
 				}
-			} else if (!isPortraitBlockerActive()) {
+			} else if (this.portraitBlockerPauseActive) {
 				this.syncPortraitBlockerPause();
 			}
 		}
@@ -406,6 +412,7 @@ export class Play extends Scene {
 
 		this.runEndedOnDeath = false;
 		const finishDeath = () => {
+			this.relayoutTouchChromeHud();
 			this.setGameplayHudVisible(true);
 			this.isResetting = false;
 			if (isPortraitBlockerActive()) {
@@ -482,6 +489,7 @@ export class Play extends Scene {
 		}
 		this.player.revive(spawnPos.x, spawnPos.y);
 		this.setupLevelColliders();
+		this.relayoutTouchChromeHud();
 		this.showLevelInstruction();
 		this.playBattleMusic();
 		this.syncTouchLandscapeSpawnIfNeeded();
@@ -644,71 +652,11 @@ export class Play extends Scene {
 		}
 	}
 
-	private hazardXsInWindow(
-		level: { obstacles?: import('../util/types').ObstacleDef[] },
-		minX: number,
-		maxX: number,
-	): number[] {
-		const hits: number[] = [];
-		for (const o of level.obstacles ?? []) {
-			if (o.type === 'fireball' && o.x >= minX && o.x <= maxX) {
-				hits.push(o.x);
-			}
-			if (o.type === 'spikes') {
-				const scale = o.size / 129;
-				const w = 402 * scale;
-				for (let i = 0; i < o.count; i++) {
-					const sx = o.x + i * w;
-					if (sx >= minX && sx <= maxX) hits.push(sx);
-				}
-			}
-		}
-		return hits;
-	}
-
-	private touchSpawnOverlapsCluster(x: number, y: number): boolean {
-		if (!this.touchControls?.visible) return false;
-		const sprite = this.player.sprite;
-		const prevX = sprite.x;
-		const prevY = sprite.y;
-		sprite.setPosition(x, y);
-		const b = sprite.getBounds();
-		sprite.setPosition(prevX, prevY);
-		const playerRect = {
-			left: b.left,
-			right: b.right,
-			top: b.top,
-			bottom: b.bottom,
-		};
-		const buttons = [
-			...(this.touchControls.getLeftMovementButtonBounds?.() ?? []),
-			...(this.touchControls.getGameplayButtonBounds?.() ?? []),
+	private touchGameplayButtons(): ButtonRect[] {
+		return [
+			...(this.touchControls?.getLeftMovementButtonBounds?.() ?? []),
+			...(this.touchControls?.getGameplayButtonBounds?.() ?? []),
 		];
-		return buttons.some(
-			(b) =>
-				playerRect.left < b.right - 0.5 &&
-				playerRect.right > b.left + 0.5 &&
-				playerRect.top < b.bottom &&
-				playerRect.bottom > b.top,
-		);
-	}
-
-	private touchSpawnHazardExclusive(
-		spawnX: number,
-		startX: number,
-		level: { obstacles?: import('../util/types').ObstacleDef[] },
-	): boolean {
-		const windowPx = touchHazardWindowPx(
-			(this.player.sprite.body as Phaser.Physics.Arcade.Body).halfWidth,
-		);
-		const touchHits = this.hazardXsInWindow(level, spawnX + 1, spawnX + windowPx);
-		const desktopParityPx = 250;
-		const startHits = this.hazardXsInWindow(
-			level,
-			startX + 1,
-			startX + desktopParityPx,
-		);
-		return touchHits.some((hx) => !startHits.includes(hx));
 	}
 
 	private touchSpawnBlockedAt(x: number, y: number): boolean {
@@ -733,7 +681,7 @@ export class Play extends Scene {
 		return blocked;
 	}
 
-	private touchSpawnPosition(): { x: number; y: number } {
+	touchSpawnPosition(): { x: number; y: number } {
 		const start = this.levelManager.current.start;
 		if (!this.touchControls?.visible) {
 			return { x: start.x, y: start.y };
@@ -746,155 +694,44 @@ export class Play extends Scene {
 		}
 		const spriteBounds = this.player.sprite.getBounds();
 		const spriteHalfW = (spriteBounds.right - spriteBounds.left) / 2;
-		const clusterMin = this.touchControls.getMinSpawnX(spriteHalfW);
-		const maxX = Math.max(
-			start.x + TOUCH_SPAWN_MAX_DELTA_FROM_START,
-			clusterMin + TOUCH_SPAWN_MAX_DELTA_FROM_START,
-			clusterMin + 8,
-		);
+		const spriteHalfH = (spriteBounds.bottom - spriteBounds.top) / 2;
 		const level = this.levelManager.current;
-		const hazardOk = (tx: number) =>
-			!this.touchSpawnHazardExclusive(tx, start.x, level);
+		this.touchControls.resetLayoutScale();
 		const ledgeOk = (tx: number) => !this.touchSpawnBlockedAt(tx, start.y);
-		const clusterOk = (tx: number) =>
-			!this.touchSpawnOverlapsCluster(tx, start.y);
-		const candidates: number[] = [];
-		for (let tx = start.x; tx <= maxX; tx += 8) {
-			if (hazardOk(tx) && ledgeOk(tx)) {
-				candidates.push(tx);
-			}
-		}
 		let x = start.x;
-		if (candidates.length > 0) {
-			const clusterSafe = candidates.filter(
-				(tx) => tx >= clusterMin && clusterOk(tx),
+		for (let attempt = 0; attempt < 14; attempt++) {
+			const clusterMin = this.touchControls.getMinSpawnX(spriteHalfW);
+			const maxX = Math.min(
+				WIDTH - spriteHalfW,
+				Math.max(
+					start.x + TOUCH_SPAWN_MAX_DELTA_FROM_START,
+					clusterMin + TOUCH_SPAWN_MAX_DELTA_FROM_START,
+					clusterMin + 8,
+					start.x + 260,
+				),
 			);
-			if (clusterSafe.length > 0) {
-				x = clusterSafe.find((tx) => tx >= clusterMin) ?? clusterSafe[0];
-			} else {
-				const pastCluster = candidates
-					.filter((tx) => tx >= clusterMin)
-					.filter((tx) => clusterOk(tx));
-				if (pastCluster.length > 0) {
-					x = pastCluster[pastCluster.length - 1];
-				} else {
-					const overlapSafe = candidates.filter((tx) => clusterOk(tx));
-					x =
-						overlapSafe.length > 0
-							? overlapSafe[overlapSafe.length - 1]
-							: start.x;
-				}
+			const safe = findSafeTouchCenterX({
+				startX: start.x,
+				clusterMinX: clusterMin,
+				maxX,
+				spawnY: start.y,
+				spriteHalfW,
+				spriteHalfH,
+				level,
+				buttons: this.touchGameplayButtons(),
+				ledgeBlocked: (tx) => !ledgeOk(tx),
+			});
+			if (safe != null) {
+				x = Math.max(safe, clusterMin);
+				return { x, y: start.y };
 			}
+			if (!this.touchControls.shrinkLayoutStep()) {
+				break;
+			}
+			this.touchControls.relayout();
 		}
-		if (this.touchControls?.visible) {
-			const searchMaxX = Math.max(maxX, clusterMin + 72, start.x + 260);
-			let hazardCap = start.x;
-			for (let tx = searchMaxX; tx >= start.x; tx -= 8) {
-				if (hazardOk(tx) && ledgeOk(tx)) {
-					hazardCap = tx;
-					break;
-				}
-			}
-			let clusterBest: number | null = null;
-			for (let tx = clusterMin; tx <= Math.min(hazardCap, searchMaxX); tx += 8) {
-				if (hazardOk(tx) && ledgeOk(tx) && clusterOk(tx)) {
-					clusterBest = tx;
-					break;
-				}
-			}
-			if (clusterBest != null) {
-				x = clusterBest;
-			} else {
-				for (let tx = clusterMin; tx <= Math.min(hazardCap, searchMaxX); tx += 8) {
-					if (hazardOk(tx) && ledgeOk(tx) && clusterOk(tx)) {
-						x = tx;
-						break;
-					}
-				}
-			}
-			if (!clusterOk(x) || !ledgeOk(x)) {
-				let resolved = start.x;
-				for (let tx = clusterMin; tx <= searchMaxX; tx += 8) {
-					if (ledgeOk(tx) && clusterOk(tx)) {
-						resolved = tx;
-						break;
-					}
-				}
-				x = resolved;
-			} else {
-				x = Math.min(x, hazardCap);
-			}
-			if (!clusterOk(x) || !ledgeOk(x) || !hazardOk(x)) {
-				let resolved = start.x;
-				for (let tx = Math.min(hazardCap, searchMaxX); tx >= clusterMin; tx -= 8) {
-					if (ledgeOk(tx) && clusterOk(tx)) {
-						resolved = tx;
-						break;
-					}
-				}
-				if (clusterOk(resolved)) {
-					x = resolved;
-				}
-			}
-			if (x < clusterMin) {
-				for (let tx = clusterMin; tx <= searchMaxX; tx += 8) {
-					if (hazardOk(tx) && ledgeOk(tx) && clusterOk(tx)) {
-						x = tx;
-						break;
-					}
-				}
-			}
-			if (this.touchSpawnOverlapsCluster(x, start.y)) {
-				let escape: number | null = null;
-				for (let tx = clusterMin; tx <= searchMaxX; tx += 8) {
-					if (hazardOk(tx) && ledgeOk(tx) && clusterOk(tx)) {
-						escape = tx;
-						break;
-					}
-				}
-				if (escape != null) {
-					x = escape;
-				} else if (hazardOk(clusterMin) && ledgeOk(clusterMin)) {
-					x = clusterMin;
-				}
-			}
-			if (this.touchSpawnOverlapsCluster(x, start.y)) {
-				let cleared: number | null = null;
-				for (let tx = clusterMin; tx <= searchMaxX; tx += 8) {
-					if (
-						ledgeOk(tx) &&
-						hazardOk(tx) &&
-						!this.touchSpawnOverlapsCluster(tx, start.y)
-					) {
-						cleared = tx;
-						break;
-					}
-				}
-				if (cleared != null) {
-					x = cleared;
-				} else {
-					for (let tx = clusterMin; tx <= searchMaxX; tx += 8) {
-						if (ledgeOk(tx) && !this.touchSpawnOverlapsCluster(tx, start.y)) {
-							x = tx;
-							break;
-						}
-					}
-				}
-			}
-			if (this.touchSpawnOverlapsCluster(x, start.y)) {
-				const spriteMaxX = WIDTH - spriteHalfW;
-				for (let tx = clusterMin; tx <= spriteMaxX; tx += 8) {
-					if (!ledgeOk(tx)) continue;
-					if (!this.touchSpawnOverlapsCluster(tx, start.y)) {
-						x = tx;
-						break;
-					}
-				}
-			}
-		}
-		if (this.touchControls?.visible) {
-			x = Math.max(x, clusterMin);
-		}
+		const clusterMin = this.touchControls.getMinSpawnX(spriteHalfW);
+		x = Math.max(x, clusterMin);
 		return { x, y: start.y };
 	}
 
@@ -948,67 +785,101 @@ export class Play extends Scene {
 
 	handleDisplayResize(): void {
 		this.touchControls?.relayout();
-		if (!this.isResetting) {
-			this.relayoutTouchChromeHud();
-		}
+		this.relayoutTouchChromeHud();
+		this.relayoutLevelInstructionIfVisible();
 		this.syncPortraitBlockerPause();
 		this.syncTouchLandscapeSpawnIfNeeded();
 		if (!this.isResetting && !this.player?.isDead) {
-			this.pushPlayerClearOfTouchButtons();
+			this.schedulePushClearOfTouchButtons();
 		}
+	}
+
+	private schedulePushClearOfTouchButtons(): void {
+		const generation = ++this.resizePushGeneration;
+		this.resizePushTimer?.remove(false);
+		this.resizePushTimer = this.time.delayedCall(280, () => {
+			if (generation !== this.resizePushGeneration) return;
+			this.pushPlayerClearOfTouchButtons();
+		});
 	}
 
 	private pushPlayerClearOfTouchButtons(): void {
 		if (!this.touchControls?.visible || !this.player?.sprite?.body) return;
 		if (this.player.isDead || this.isResetting) return;
 		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
-		const buttons = [
-			...(this.touchControls.getLeftMovementButtonBounds?.() ?? []),
-			...(this.touchControls.getGameplayButtonBounds?.() ?? []),
-		];
+		const buttons = this.touchGameplayButtons();
 		if (buttons.length === 0) return;
 
 		const sprite = this.player.sprite;
-		const overlapsAt = (centerX: number) => {
-			const prevX = sprite.x;
-			sprite.setX(centerX);
-			const b = sprite.getBounds();
-			sprite.setX(prevX);
-			body.updateFromGameObject();
-			const playerRect = {
-				left: b.left,
-				right: b.right,
-				top: b.top,
-				bottom: b.bottom,
-			};
-			return buttons.some(
-				(bn) =>
-					playerRect.left < bn.right - 0.5 &&
-					playerRect.right > bn.left + 0.5 &&
-					playerRect.top < bn.bottom &&
-					playerRect.bottom > bn.top,
-			);
-		};
+		const sprB = sprite.getBounds();
+		const spriteHalfW = (sprB.right - sprB.left) / 2;
+		const spriteHalfH = (sprB.bottom - sprB.top) / 2;
+		const startY = this.levelManager.current.start.y;
+		const startX = sprite.x;
 
-		const startX = this.player.sprite.x;
-		if (!overlapsAt(startX)) return;
+		if (
+			!spriteOverlapsButtons(
+				startX,
+				startY,
+				spriteHalfW,
+				spriteHalfH,
+				buttons,
+			)
+		) {
+			return;
+		}
 
-		const minX = body.halfWidth;
-		const maxX = WIDTH - body.halfWidth;
+		const level = this.levelManager.current;
+		const maxX = WIDTH - spriteHalfW;
+		const ledgeOk = (tx: number) => !this.touchSpawnBlockedAt(tx, startY);
 		let best: number | null = null;
 		let bestDist = Infinity;
-		for (let tx = minX; tx <= maxX; tx += 4) {
-			if (!overlapsAt(tx)) {
-				const d = Math.abs(tx - startX);
-				if (d < bestDist) {
-					bestDist = d;
-					best = tx;
-				}
+		for (let tx = body.halfWidth; tx <= maxX; tx += 4) {
+			if (!ledgeOk(tx)) continue;
+			if (
+				spriteOverlapsButtons(tx, startY, spriteHalfW, spriteHalfH, buttons)
+			) {
+				continue;
+			}
+			if (
+				!touchSpawnHazardClearAt(
+					tx,
+					spriteHalfW,
+					level,
+					startY,
+				)
+			) {
+				continue;
+			}
+			const d = Math.abs(tx - startX);
+			if (d < bestDist) {
+				bestDist = d;
+				best = tx;
 			}
 		}
 		if (best == null) return;
 		this.player.sprite.setX(best);
 		body.updateFromGameObject();
+	}
+
+	private relayoutLevelInstructionIfVisible(): void {
+		if (!this.instructionPanel?.active || !this.instructionText?.active) {
+			return;
+		}
+		const panelY = isTouchDevice(this)
+			? touchInstructionPanelCenterY(this)
+			: PLAY_HUD_CLEARANCE_Y + 110;
+		const panelW = this.cameras.main.width - 120;
+		this.instructionPanel.setPosition(
+			this.cameras.main.width / 2,
+			panelY,
+		);
+		this.instructionPanel.width = panelW;
+		this.instructionText.setPosition(
+			this.cameras.main.width / 2,
+			panelY,
+		);
+		this.instructionText.setWordWrapWidth(this.cameras.main.width - 200);
 	}
 
 	private relayoutTouchChromeHud(): void {
@@ -1058,8 +929,17 @@ export class Play extends Scene {
 		if (this.pausePanel) {
 			return;
 		}
+		const wasPortraitPause = this.portraitBlockerPauseActive;
 		this.portraitBlockerPauseActive = false;
-		if (this.isPaused || world.isPaused) {
+		const deathOrReset =
+			this.isResetting ||
+			this.player?.isDead ||
+			this.deathSequence?.isEscBlocked();
+		if (
+			wasPortraitPause &&
+			!deathOrReset &&
+			(this.isPaused || world.isPaused)
+		) {
 			this.isPaused = false;
 			this.physics.resume();
 			this.setGameplayClockPaused(false);

@@ -67,6 +67,12 @@ export class TouchControls {
 	} = {};
 	private onPause?: () => void;
 	private readonly activeHolds = new Map<number, HoldRole>();
+	private readonly rolePointerCounts = new Map<HoldRole, Set<number>>();
+	private readonly roleHoldCallbacks = new Map<
+		HoldRole,
+		{ onUp: () => void; pointerSlot: { pointerId: number | null } }
+	>();
+	private layoutScale = 1;
 	private readonly buttonHitAreas = new Map<HoldRole, Phaser.GameObjects.Rectangle>();
 	private readonly pointerReleaseHandlers: Array<{
 		pointerId: number | null;
@@ -74,16 +80,40 @@ export class TouchControls {
 		press: () => void;
 		release: () => void;
 	}> = [];
+	private releaseRolePointer(
+		role: HoldRole,
+		pointer: Phaser.Input.Pointer,
+		onUp: () => void,
+		pointerSlot: { pointerId: number | null },
+	): void {
+		const set = this.rolePointerCounts.get(role);
+		if (!set?.has(pointer.id)) return;
+		set.delete(pointer.id);
+		this.activeHolds.delete(pointer.id);
+		if (pointerSlot.pointerId === pointer.id) {
+			pointerSlot.pointerId = null;
+		}
+		if (set.size === 0) {
+			onUp();
+		}
+	}
+
 	private readonly onGlobalPointerRelease = (
 		pointer: Phaser.Input.Pointer,
 	) => {
 		for (const entry of this.pointerReleaseHandlers) {
-			if (entry.pointerId === pointer.id) {
-				entry.pointerId = null;
-				entry.release();
+			const set = this.rolePointerCounts.get(entry.role);
+			if (!set?.has(pointer.id)) continue;
+			const cb = this.roleHoldCallbacks.get(entry.role);
+			if (cb) {
+				this.releaseRolePointer(
+					entry.role,
+					pointer,
+					cb.onUp,
+					cb.pointerSlot,
+				);
 			}
 		}
-		this.activeHolds.delete(pointer.id);
 	};
 
 	private readonly onGlobalPointerMove = (pointer: Phaser.Input.Pointer) => {
@@ -91,9 +121,18 @@ export class TouchControls {
 		for (const entry of this.pointerReleaseHandlers) {
 			if (entry.pointerId !== pointer.id) continue;
 			if (!this.pointerHitsRole(pointer, entry.role)) {
-				entry.pointerId = null;
-				entry.release();
-				this.activeHolds.delete(pointer.id);
+				const cb = this.roleHoldCallbacks.get(entry.role);
+				if (
+					cb &&
+					this.rolePointerCounts.get(entry.role)?.has(pointer.id)
+				) {
+					this.releaseRolePointer(
+						entry.role,
+						pointer,
+						cb.onUp,
+						cb.pointerSlot,
+					);
+				}
 			}
 		}
 		for (const entry of this.pointerReleaseHandlers) {
@@ -101,17 +140,27 @@ export class TouchControls {
 			if (entry.pointerId === pointer.id) continue;
 			const heldRole = this.activeHolds.get(pointer.id);
 			if (heldRole && heldRole !== entry.role) {
-				const prev = this.pointerReleaseHandlers.find(
-					(h) => h.role === heldRole && h.pointerId === pointer.id,
-				);
-				if (prev) {
-					prev.pointerId = null;
-					prev.release();
+				const prevCb = this.roleHoldCallbacks.get(heldRole);
+				if (
+					prevCb &&
+					this.rolePointerCounts.get(heldRole)?.has(pointer.id)
+				) {
+					this.releaseRolePointer(
+						heldRole,
+						pointer,
+						prevCb.onUp,
+						prevCb.pointerSlot,
+					);
 				}
 			}
+			const set = this.rolePointerCounts.get(entry.role);
+			const wasEmpty = !set || set.size === 0;
+			set?.add(pointer.id);
 			entry.pointerId = pointer.id;
 			this.activeHolds.set(pointer.id, entry.role);
-			entry.press();
+			if (wasEmpty) {
+				entry.press();
+			}
 		}
 	};
 
@@ -228,6 +277,8 @@ export class TouchControls {
 
 		this.pointerReleaseHandlers.length = 0;
 		this.buttonHitAreas.clear();
+		this.rolePointerCounts.clear();
+		this.roleHoldCallbacks.clear();
 		for (const node of [...this.gameplayNodes, ...this.chromeNodes]) {
 			node.destroy();
 		}
@@ -261,14 +312,42 @@ export class TouchControls {
 		}
 	}
 
+	resetLayoutScale(): void {
+		this.layoutScale = 1;
+	}
+
+	shrinkLayoutStep(): boolean {
+		const displayScale = Math.max(
+			this.scene.scale.displaySize.width / WIDTH,
+			this.scene.scale.displaySize.height / HEIGHT,
+		);
+		const minScale =
+			(MIN_TOUCH_CSS_PX / displayScale) / BASE_BTN_GAME_PX;
+		const next = this.layoutScale - 0.06;
+		if (next < minScale) {
+			this.layoutScale = minScale;
+			return false;
+		}
+		this.layoutScale = next;
+		return true;
+	}
+
+	getLayoutButtonSize(): number {
+		return this.layoutMetrics().size;
+	}
+
 	private layoutMetrics() {
 		const displayScale = Math.max(
 			this.scene.scale.displaySize.width / WIDTH,
 			this.scene.scale.displaySize.height / HEIGHT,
 		);
-		const size = Math.max(
+		const baseSize = Math.max(
 			BASE_BTN_GAME_PX,
 			Math.ceil(MIN_TOUCH_CSS_PX / displayScale),
+		);
+		const size = Math.max(
+			Math.ceil(MIN_TOUCH_CSS_PX / displayScale),
+			Math.floor(baseSize * this.layoutScale),
 		);
 		const margin = Math.max(
 			BASE_MARGIN_GAME_PX,
@@ -300,8 +379,9 @@ export class TouchControls {
 		const fontSize =
 			role === 'jump'
 				? Math.max(
-						gameFontForMinScreenPx(this.scene, MIN_TOUCH_SCREEN_TEXT_PX),
-						Math.floor(size * 0.5),
+						gameFontForMinScreenPx(this.scene, MIN_TOUCH_SCREEN_TEXT_PX + 6),
+						Math.floor(size * 0.58),
+						44,
 					)
 				: Math.max(36, Math.floor(size * 0.32));
 		const text = this.scene.add
@@ -322,20 +402,27 @@ export class TouchControls {
 			release: onUp,
 		};
 		this.pointerReleaseHandlers.push(pointerSlot);
-		const releaseIfOwner = (pointer: Phaser.Input.Pointer) => {
-			if (pointerSlot.pointerId !== pointer.id) return;
-			pointerSlot.pointerId = null;
-			this.activeHolds.delete(pointer.id);
-			onUp();
+		const pointersOnRole =
+			this.rolePointerCounts.get(role) ?? new Set<number>();
+		this.rolePointerCounts.set(role, pointersOnRole);
+		const releasePointer = (pointer: Phaser.Input.Pointer) => {
+			this.releaseRolePointer(role, pointer, onUp, pointerSlot);
 		};
+		this.roleHoldCallbacks.set(role, { onUp, pointerSlot });
+		pointerSlot.release = () => {};
 		bg.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
 			pointer.event?.preventDefault();
+			const set = this.rolePointerCounts.get(role)!;
+			const wasEmpty = set.size === 0;
+			set.add(pointer.id);
 			pointerSlot.pointerId = pointer.id;
 			this.activeHolds.set(pointer.id, role);
-			onDown();
+			if (wasEmpty) {
+				onDown();
+			}
 		});
-		bg.on('pointerup', releaseIfOwner);
-		bg.on('pointercancel', releaseIfOwner);
+		bg.on('pointerup', releasePointer);
+		bg.on('pointercancel', releasePointer);
 
 		const bucket = chrome ? this.chromeNodes : this.gameplayNodes;
 		bucket.push(bg, text);

@@ -112,7 +112,7 @@ async function runPauseEscToggle(baseUrl) {
 	return { pauseEscOk: true };
 }
 
-async function bootToPlay(page, baseUrl, search = '') {
+async function bootToPlay(page, baseUrl, search = '?debug=1') {
 	const url = search ? `${baseUrl}${search.startsWith('?') ? search : `?${search}`}` : baseUrl;
 	await page.goto(url);
 	await page.waitForTimeout(3000);
@@ -1151,13 +1151,71 @@ const TOUCH_HUD_VIEWPORTS = [
 
 const TOUCH_SPAWN_VIEWPORTS = [
 	{ width: 568, height: 320 },
+	{ width: 568, height: 270 },
 	{ width: 640, height: 360 },
+	{ width: 640, height: 310 },
 	{ width: 844, height: 340 },
 	{ width: 844, height: 390 },
 	{ width: 932, height: 430 },
 ];
 
 const TOUCH_SPAWN_PAD = 12;
+const TOUCH_HAZARD_MARGIN_PX = 96;
+const FIREBALL_HAZARD_HALF_W = 27;
+const SPIKE_FRAME_W = 402;
+
+function hazardIntervalsForLevel(level, spawnY) {
+	const intervals = [];
+	for (const o of level.obstacles ?? []) {
+		if (o.type === 'spikes') {
+			const scale = o.size / 129;
+			const w = SPIKE_FRAME_W * scale;
+			for (let i = 0; i < o.count; i++) {
+				const left = o.x + i * w;
+				intervals.push({ left, right: left + w });
+			}
+		}
+		if (o.type === 'fireball' && spawnY <= o.y + 120) {
+			intervals.push({
+				left: o.x - FIREBALL_HAZARD_HALF_W,
+				right: o.x + FIREBALL_HAZARD_HALF_W,
+			});
+		}
+	}
+	return intervals;
+}
+
+function clearanceToHazards(bounds, hazards) {
+	let best = Infinity;
+	for (const h of hazards) {
+		if (bounds.right <= h.left) {
+			best = Math.min(best, h.left - bounds.right);
+		} else if (bounds.left >= h.right) {
+			best = Math.min(best, bounds.left - h.right);
+		} else {
+			return 0;
+		}
+	}
+	return best === Infinity ? Infinity : best;
+}
+
+function touchSpawnHazardMarginOk(spriteBounds, level, spawnY) {
+	const hazards = hazardIntervalsForLevel(level, spawnY);
+	const gap = clearanceToHazards(
+		{
+			left: spriteBounds.left,
+			right: spriteBounds.right,
+		},
+		hazards,
+	);
+	return gap >= TOUCH_HAZARD_MARGIN_PX;
+}
+
+const URL_BAR_SHRINK_CASES = [
+	{ start: { width: 568, height: 320 }, shrink: { width: 568, height: 270 } },
+	{ start: { width: 640, height: 360 }, shrink: { width: 640, height: 310 } },
+	{ start: { width: 844, height: 390 }, shrink: { width: 844, height: 340 } },
+];
 
 async function collectTouchHudOverlap(page) {
 	return page.evaluate(() => {
@@ -1547,15 +1605,38 @@ async function runTouchSpawnSafety(baseUrl) {
 					}
 				}
 				const spawnTol = vpWidth <= 640 ? 8 : 4;
-				const hazardParityOk =
-					touchOnly.length === 0 ||
-					(!overlapsButtons &&
-						spawnX >= boundsMin - 4 &&
-						spawnX >= clusterMin - 4);
+				const hazardMarginPx = (() => {
+					const hazards = [];
+					for (const o of levelDef.obstacles ?? []) {
+						if (o.type === 'spikes') {
+							const scale = o.size / 129;
+							const w = 402 * scale;
+							for (let i = 0; i < o.count; i++) {
+								const left = o.x + i * w;
+								hazards.push({ left, right: left + w });
+							}
+						}
+						if (o.type === 'fireball' && start.y <= o.y + 120) {
+							hazards.push({
+								left: o.x - 27,
+								right: o.x + 27,
+							});
+						}
+					}
+					let best = Infinity;
+					const b = { left: sprB.left, right: sprB.right };
+					for (const h of hazards) {
+						if (b.right <= h.left) best = Math.min(best, h.left - b.right);
+						else if (b.left >= h.right) best = Math.min(best, b.left - h.right);
+						else return 0;
+					}
+					return best === Infinity ? Infinity : best;
+				})();
+				const hazardMarginOk = hazardMarginPx >= 96;
 				return {
 					ok:
 						Math.abs(spawnX - want.x) <= spawnTol &&
-						hazardParityOk &&
+						hazardMarginOk &&
 						!overlapsButtons &&
 						spawnX >= boundsMin - 4 &&
 						spawnX >= clusterMin - 4,
@@ -1563,6 +1644,7 @@ async function runTouchSpawnSafety(baseUrl) {
 					startX,
 					delta,
 					touchOnlyHazards: touchOnly,
+					hazardMarginPx,
 					overlapsButtons,
 					feasible,
 					phase,
@@ -1702,10 +1784,7 @@ async function runTouchDisplayResizeMutationProofs(baseUrl) {
 		const spriteHalfW = (sprB.right - sprB.left) / 2;
 		const leftButtons =
 			play.touchControls.getLeftMovementButtonBounds?.() ?? [];
-		const boundsMin =
-			leftButtons.length > 0
-				? Math.max(...leftButtons.map((b) => b.right)) + 12 + spriteHalfW
-				: 0;
+		const boundsMin = play.touchControls.getMinSpawnX(spriteHalfW);
 		const fakeMin = 40 + spriteHalfW;
 		const capGapOk = boundsMin > fakeMin + 40;
 		return { capGapOk, boundsMin, fakeMin, spawnX: play.player.sprite.x };
@@ -2788,12 +2867,7 @@ async function runPortraitDeathLandscapeSpawnMatrix(baseUrl) {
 		await page.waitForTimeout(200);
 		await portraitRoundTrip(page);
 		await waitForPlayReady(page, 25000);
-		await page.evaluate(() => {
-			const play = window.__icarusGame?.scene.getScene('Play');
-			play?.handleDisplayResize?.();
-			play?.resetPlayer?.();
-		});
-		await page.waitForTimeout(200);
+		await page.waitForTimeout(400);
 		const detail = await page.evaluate(() => {
 			const play = window.__icarusGame?.scene.getScene('Play');
 			if (!play?.player?.sprite?.body) {
@@ -2953,11 +3027,9 @@ async function runFireballFirstSpawnTiming(baseUrl) {
 	});
 	await browser.close();
 	const target = expectedFireballFirstSpawnMs(1000, 1800);
-	const near = (ms) => ms != null && ms >= target - 150 && ms <= target + 150;
-	const nearFirstEntry = (ms) =>
-		ms != null && ms >= target - 150 && ms <= target + 850;
+	const near = (ms) => ms != null && ms >= target - 100 && ms <= target + 100;
 	return {
-		fireballFirstSpawnTimingOk: nearFirstEntry(firstEntry) && near(afterRespawn),
+		fireballFirstSpawnTimingOk: near(firstEntry) && near(afterRespawn),
 		expectedFirstSpawnMs: target,
 		firstEntryMs: firstEntry,
 		afterRespawnMs: afterRespawn,
@@ -2997,14 +3069,9 @@ async function runTouchResizeButtonClearance(baseUrl) {
 		await page.waitForTimeout(400);
 		await page.evaluate(() => {
 			window.__icarusPrepareLevel?.(0);
-			const play = window.__icarusGame?.scene.getScene('Play');
-			play?.handleDisplayResize?.();
 		});
 		await page.setViewportSize(caseDef.shrink);
-		await page.waitForTimeout(500);
-		await page.evaluate(() => {
-			window.__icarusGame?.scene.getScene('Play')?.handleDisplayResize?.();
-		});
+		await page.waitForTimeout(600);
 		const overlap = await collectTouchButtonOverlap(page);
 		if (!overlap.ok) failures.push({ case: caseDef, ...overlap });
 	}
@@ -3615,7 +3682,212 @@ async function applyCpuThrottleIfRequested(page) {
 	await client.send('Emulation.setCPUThrottlingRate', { rate: 4 });
 }
 
+async function runTouchUrlBarShrinkAsserts(baseUrl) {
+	const failures = [];
+	const browser = await chromium.launch();
+	const page = await browser.newPage({
+		viewport: { width: 844, height: 390 },
+		isMobile: true,
+		hasTouch: true,
+	});
+	await bootToPlay(page, baseUrl);
+	for (const caseDef of URL_BAR_SHRINK_CASES) {
+		await page.setViewportSize(caseDef.start);
+		await page.waitForTimeout(400);
+		await page.evaluate((idx) => window.__icarusPrepareLevel?.(7), 7);
+		await page.setViewportSize(caseDef.shrink);
+		await page.waitForTimeout(650);
+		const hud = await collectTouchHudOverlap(page);
+		const buttons = await collectTouchButtonOverlap(page);
+		const spawn = await evaluateTouchSpawnClearance(page, 7);
+		if (!hud.ok && !hud.skip) {
+			failures.push({ case: caseDef, kind: 'chrome', ...hud });
+		}
+		if (!buttons.ok && !buttons.skip) {
+			failures.push({ case: caseDef, kind: 'buttons', ...buttons });
+		}
+		if (!spawn.ok && !spawn.skip) {
+			failures.push({ case: caseDef, kind: 'spawn', ...spawn });
+		}
+	}
+	await browser.close();
+	return { touchUrlBarShrinkOk: failures.length === 0, failures };
+}
+
+async function runTouchDeathPhysicsPaused(baseUrl) {
+	const browser = await chromium.launch();
+	const page = await browser.newPage({
+		viewport: { width: 844, height: 390 },
+		isMobile: true,
+		hasTouch: true,
+	});
+	await bootToPlay(page, baseUrl);
+	await page.evaluate(() => window.__icarusPrepareLevel?.(5));
+	await page.evaluate(() => {
+		window.__icarusGame?.scene.getScene('Play')?.killPlayer('fall', {
+			fast: true,
+			spendLife: false,
+		});
+	});
+	const sample = await page.evaluate(async () => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		let maxFireballs = 0;
+		let timersUnpaused = false;
+		let physicsRunning = false;
+		for (let i = 0; i < 80; i++) {
+			await new Promise((r) => setTimeout(r, 25));
+			if (!play?.isResetting) break;
+			const n =
+				play?.levelManager?.fireballs?.filter((f) => f.sprite?.active)
+					.length ?? 0;
+			maxFireballs = Math.max(maxFireballs, n);
+			if (
+				(play?.levelManager?.fireballTimers ?? []).some((t) => !t.paused)
+			) {
+				timersUnpaused = true;
+			}
+			if (play?.physics?.world?.isPaused === false) {
+				physicsRunning = true;
+			}
+		}
+		return { maxFireballs, timersUnpaused, physicsRunning };
+	});
+	await browser.close();
+	return {
+		touchDeathPhysicsPausedOk:
+			sample.maxFireballs === 0 && !sample.timersUnpaused,
+		...sample,
+	};
+}
+
+async function runTouchDeathHudResize(baseUrl) {
+	const browser = await chromium.launch();
+	const page = await browser.newPage({
+		viewport: { width: 844, height: 390 },
+		isMobile: true,
+		hasTouch: true,
+	});
+	await bootToPlay(page, baseUrl);
+	await page.evaluate(() => window.__icarusPrepareLevel?.(0));
+	await page.evaluate(() => {
+		window.__icarusGame?.scene.getScene('Play')?.killPlayer('fall', {
+			fast: true,
+			spendLife: false,
+		});
+	});
+	await page.waitForTimeout(200);
+	await page.setViewportSize({ width: 568, height: 320 });
+	await page.waitForTimeout(650);
+	const gap = await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const chrome = play?.touchControls?.getChromeBounds?.() ?? [];
+		const pause = chrome[0];
+		const lives = play?.livesText?.getBounds?.();
+		if (!pause || !lives) return { ok: false, reason: 'missing' };
+		const overlap =
+			pause.left < lives.right &&
+			pause.right > lives.left &&
+			pause.top < lives.bottom &&
+			pause.bottom > lives.top;
+		return { ok: !overlap, pause, lives };
+	});
+	await browser.close();
+	return { touchDeathHudResizeOk: gap.ok, ...gap };
+}
+
+async function runTouchDualFingerSameButton(baseUrl) {
+	const browser = await chromium.launch();
+	const page = await browser.newPage({
+		viewport: { width: 844, height: 390 },
+		isMobile: true,
+		hasTouch: true,
+	});
+	await bootToPlay(page, baseUrl);
+	await page.locator('canvas').click();
+	const right = await touchPointForTarget(page, 'right');
+	const client = await page.context().newCDPSession(page);
+	await client.send('Emulation.setTouchEmulationEnabled', {
+		enabled: true,
+		maxTouchPoints: 2,
+	});
+	const mk = (id, p) => ({
+		id,
+		x: p.x,
+		y: p.y,
+		radiusX: 1,
+		radiusY: 1,
+		force: 1,
+	});
+	await client.send('Input.dispatchTouchEvent', {
+		type: 'touchStart',
+		touchPoints: [mk(0, right)],
+	});
+	await page.waitForTimeout(120);
+	const heldA = await page.evaluate(
+		() =>
+			window.__icarusGame?.scene.getScene('Play')?.touchControls?.getInput()
+				?.right === true,
+	);
+	await client.send('Input.dispatchTouchEvent', {
+		type: 'touchStart',
+		touchPoints: [mk(0, right), mk(1, right)],
+	});
+	await page.waitForTimeout(80);
+	await client.send('Input.dispatchTouchEvent', {
+		type: 'touchEnd',
+		touchPoints: [mk(1, right)],
+	});
+	await page.waitForTimeout(80);
+	const heldAfterBLift = await page.evaluate(
+		() =>
+			window.__icarusGame?.scene.getScene('Play')?.touchControls?.getInput()
+				?.right === true,
+	);
+	await client.send('Input.dispatchTouchEvent', {
+		type: 'touchEnd',
+		touchPoints: [],
+	});
+	await page.waitForTimeout(80);
+	const heldAfterALift = await page.evaluate(
+		() =>
+			window.__icarusGame?.scene.getScene('Play')?.touchControls?.getInput()
+				?.right === true,
+	);
+	await browser.close();
+	return {
+		touchDualFingerSameButtonOk:
+			heldA && heldAfterBLift && !heldAfterALift,
+		heldA,
+		heldAfterBLift,
+		heldAfterALift,
+	};
+}
+
+async function runProdBundleDebugGlobals(baseUrl) {
+	const { execSync } = await import('node:child_process');
+	execSync('npm run build', { cwd: process.cwd(), stdio: 'pipe' });
+	const { readFileSync, readdirSync } = await import('node:fs');
+	const { join } = await import('node:path');
+	const distDir = join(process.cwd(), 'dist');
+	const files = readdirSync(distDir).filter((f) => f.endsWith('.js'));
+	let leaked = [];
+	for (const file of files) {
+		const text = readFileSync(join(distDir, file), 'utf8');
+		if (text.includes('__icarusPrepareLevel')) leaked.push(file);
+		if (text.includes('__icarusTouchChromeMetrics')) leaked.push(`${file}:metrics`);
+	}
+	return {
+		prodBundleDebugGlobalsOk: leaked.length === 0,
+		leaked,
+	};
+}
+
 async function main() {
+	const { execSync } = await import('node:child_process');
+	execSync('npx vite build --config vite/config.qa.mjs', {
+		cwd: process.cwd(),
+		stdio: 'inherit',
+	});
 	const touchLayoutMutation = runTouchLayoutMutationGuards();
 	const sanitizePixelFont = await loadSanitizePixelFont();
 	const ligature = checkSanitizePixelFont(sanitizePixelFont);
@@ -3664,6 +3936,11 @@ async function main() {
 	const fireballFirstSpawnTiming = await runFireballFirstSpawnTiming(baseUrl);
 	const touchResizeButtonClearance =
 		await runTouchResizeButtonClearance(baseUrl);
+	const touchUrlBarShrink = await runTouchUrlBarShrinkAsserts(baseUrl);
+	const touchDeathPhysicsPaused = await runTouchDeathPhysicsPaused(baseUrl);
+	const touchDeathHudResize = await runTouchDeathHudResize(baseUrl);
+	const touchDualFingerSameButton = await runTouchDualFingerSameButton(baseUrl);
+	const prodBundleDebugGlobals = await runProdBundleDebugGlobals(baseUrl);
 	const l15RealKeys = await runL15RealKeys(baseUrl);
 	const portraitUnfreeze = await runPortraitUnfreezeCases(baseUrl);
 	const touchPauseToggle = await runTouchPauseToggle(baseUrl);
@@ -3717,6 +3994,11 @@ async function main() {
 		touchArrowSlide.touchArrowSlideOk &&
 		fireballFirstSpawnTiming.fireballFirstSpawnTimingOk &&
 		touchResizeButtonClearance.touchResizeButtonClearanceOk &&
+		touchUrlBarShrink.touchUrlBarShrinkOk &&
+		touchDeathPhysicsPaused.touchDeathPhysicsPausedOk &&
+		touchDeathHudResize.touchDeathHudResizeOk &&
+		touchDualFingerSameButton.touchDualFingerSameButtonOk &&
+		prodBundleDebugGlobals.prodBundleDebugGlobalsOk &&
 		l15RealKeys.l15RealKeysOk &&
 		portraitUnfreeze.portraitUnfreezeOk &&
 		touchPauseToggle.touchPauseToggleOk &&
@@ -3776,6 +4058,11 @@ async function main() {
 				touchArrowSlide,
 				fireballFirstSpawnTiming,
 				touchResizeButtonClearance,
+				touchUrlBarShrink,
+				touchDeathPhysicsPaused,
+				touchDeathHudResize,
+				touchDualFingerSameButton,
+				prodBundleDebugGlobals,
 				l15RealKeys,
 				portraitUnfreeze,
 				touchPauseToggle,
