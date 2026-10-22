@@ -788,6 +788,9 @@ export class Play extends Scene {
 		const spriteHalfW = (sprB.right - sprB.left) / 2;
 		const clusterMin = this.touchControls.getMinSpawnX(spriteHalfW);
 		const maxX = this.touchSpawnSearchMaxX(spriteHalfW);
+		if (maxX < clusterMin) {
+			return null;
+		}
 		const buttons = this.touchGameplayButtons();
 		let hazardOverlapFallback: number | null = null;
 		for (let tx = clusterMin; tx <= maxX; tx += 4) {
@@ -823,6 +826,16 @@ export class Play extends Scene {
 		const maxX = this.touchSpawnSearchMaxX(spriteHalfW);
 		const ledgeBlocked = (tx: number) =>
 			this.touchSpawnBlockedAt(tx, start.y);
+		if (maxX < clusterMin) {
+			if (
+				!ledgeBlocked(maxX) &&
+				this.touchSpawnHazardMarginAt(maxX, start.y) >=
+					TOUCH_HAZARD_MARGIN_PX
+			) {
+				return { x: Math.round(maxX), y: start.y };
+			}
+			return { x: start.x, y: start.y };
+		}
 		for (let tx = clusterMin; tx <= maxX; tx += 4) {
 			if (ledgeBlocked(tx)) continue;
 			if (
@@ -847,7 +860,7 @@ export class Play extends Scene {
 			return { x: start.x, y: start.y };
 		}
 		this.refreshTouchSpawnLayout();
-		for (let attempt = 0; attempt < 24; attempt++) {
+		for (let attempt = 0; attempt < 36; attempt++) {
 			const pos = this.pickTouchSpawnAtCurrentLayout(false);
 			if (pos) {
 				return pos;
