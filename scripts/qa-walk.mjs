@@ -667,6 +667,10 @@ async function holdTouchLeft(page, ms = 2500) {
 }
 
 async function assertUnfrozenAndMoving(page) {
+	await page.keyboard.up('ArrowRight');
+	await page.keyboard.up('ArrowLeft');
+	await page.keyboard.up('ArrowUp');
+	await page.keyboard.up('KeyD');
 	const state = await page.evaluate(() => {
 		const play = window.__icarusGame?.scene.getScene('Play');
 		return {
@@ -679,7 +683,13 @@ async function assertUnfrozenAndMoving(page) {
 		return { ok: false, reason: 'frozen', state };
 	}
 	await page.evaluate(() => {
-		window.__icarusGame?.scene.getScene('Play')?.handleDisplayResize?.();
+		const play = window.__icarusGame?.scene.getScene('Play');
+		play?.handleDisplayResize?.();
+		for (const pointer of play?.input?.manager?.pointers ?? []) {
+			if (pointer.isDown) {
+				pointer.up();
+			}
+		}
 	});
 	await page.waitForTimeout(150);
 	const before = await getPlayerPos(page);
