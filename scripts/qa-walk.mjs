@@ -3291,7 +3291,14 @@ async function runPortraitUnfreezeCases(baseUrl) {
 			spendLife: false,
 		});
 	});
-	await page.waitForTimeout(2000);
+	await page.waitForFunction(
+		() => {
+			const play = window.__icarusGame?.scene.getScene('Play');
+			return play && !play.isResetting && !play.player?.isDead;
+		},
+		undefined,
+		{ timeout: 20000 },
+	);
 	await page.setViewportSize({ width: 844, height: 390 });
 	await page.evaluate(() => {
 		window.dispatchEvent(new Event('resize'));
