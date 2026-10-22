@@ -617,6 +617,22 @@ export class TouchControls {
 		return this.state;
 	}
 
+	/** Drop all virtual holds (e.g. after synthetic touch end in QA). */
+	releaseAllHolds(): void {
+		this.activeHolds.clear();
+		this.rolePointerCounts.clear();
+		for (const slot of this.pointerReleaseHandlers) {
+			slot.pointerId = null;
+		}
+		this.setTouchState({
+			left: false,
+			right: false,
+			jump: false,
+			shoot: false,
+			dash: false,
+		});
+	}
+
 	setTouchState(
 		partial: Partial<
 			Pick<TouchInputState, 'left' | 'right' | 'jump' | 'shoot' | 'dash'>

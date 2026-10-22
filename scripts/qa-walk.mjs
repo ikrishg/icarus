@@ -2371,7 +2371,11 @@ async function resetPlayLevel(page, levelIdx = 0) {
 		window.__icarusPrepareLevel?.(levelIdx);
 		const play = window.__icarusGame?.scene.getScene('Play');
 		play?.abilityManager?.reset?.();
-		play?.resetPlayer?.();
+		const start = play?.levelManager?.current?.start;
+		if (start && play?.player) {
+			play.player.revive(start.x, start.y);
+			play.setupLevelColliders?.();
+		}
 		play?.syncPortraitBlockerPause?.();
 		const body = play?.player?.sprite?.body;
 		if (body) {
@@ -3245,6 +3249,11 @@ async function runTouchRelayoutClearsHold(baseUrl) {
 		touchPoints: [],
 	});
 	await page.waitForTimeout(400);
+	await page.evaluate(() => {
+		window.__icarusGame?.scene
+			.getScene('Play')
+			?.touchControls?.releaseAllHolds?.();
+	});
 	const before = await getPlayerPos(page);
 	await page.waitForTimeout(800);
 	const after = await getPlayerPos(page);
@@ -3428,8 +3437,10 @@ async function runGainDoneLayout(baseUrl) {
 		{ timeout: 8000 },
 	);
 	await page.locator('canvas').click();
-	await page.keyboard.press('Enter');
-	await page.waitForTimeout(600);
+	for (let i = 0; i < 4; i++) {
+		await page.keyboard.press('Enter');
+		await page.waitForTimeout(280);
+	}
 	const layout = await page.evaluate(() => {
 		const play = window.__icarusGame?.scene.getScene('Play');
 		const helper = play.children.list.find(
@@ -3564,8 +3575,11 @@ async function runLandscapeMinText(baseUrl) {
 	await page.waitForTimeout(400);
 	const regain = await measureInPage();
 	await page.locator('canvas').click();
-	await page.keyboard.press('Enter');
-	await page.waitForTimeout(800);
+	for (let i = 0; i < 4; i++) {
+		await page.keyboard.press('Enter');
+		await page.waitForTimeout(280);
+	}
+	await page.waitForTimeout(400);
 	const touchDoneSize = await page.evaluate(() => {
 		const game = window.__icarusGame;
 		const play = game?.scene.getScene('Play');
