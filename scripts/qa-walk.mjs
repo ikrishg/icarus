@@ -692,6 +692,13 @@ async function assertUnfrozenAndMoving(page) {
 		}
 	});
 	await page.waitForTimeout(150);
+	await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const body = play?.player?.sprite?.body;
+		if (body) {
+			body.setVelocity(0, 0);
+		}
+	});
 	const before = await getPlayerPos(page);
 	await holdTouchRight(page, 2200);
 	const after = await getPlayerPos(page);
@@ -2363,7 +2370,12 @@ async function resetPlayLevel(page, levelIdx = 0) {
 	await page.evaluate((levelIdx) => {
 		window.__icarusPrepareLevel?.(levelIdx);
 		const play = window.__icarusGame?.scene.getScene('Play');
+		play?.resetPlayer?.();
 		play?.syncPortraitBlockerPause?.();
+		const body = play?.player?.sprite?.body;
+		if (body) {
+			body.setVelocity(0, 0);
+		}
 	}, levelIdx);
 	await page.waitForTimeout(300);
 }
@@ -3165,12 +3177,13 @@ async function runL15RealKeys(baseUrl) {
 			stuckTicks = 0;
 		}
 		const y = (await getPlayerPos(page)).y;
-		if (x > 1580 && y > 480) {
+		if (x > 1500 && y > 360) {
 			await page.keyboard.up('ArrowRight');
-			for (let burst = 0; burst < 6; burst++) {
-				await page.keyboard.press('KeyQ');
+			for (let burst = 0; burst < 10; burst++) {
 				await page.keyboard.press('Space');
-				await page.waitForTimeout(220);
+				await page.waitForTimeout(120);
+				await page.keyboard.press('KeyQ');
+				await page.waitForTimeout(120);
 			}
 			await page.keyboard.down('ArrowRight');
 			await page.keyboard.down('ArrowUp');
@@ -3407,7 +3420,17 @@ async function runGainDoneLayout(baseUrl) {
 	await page.waitForTimeout(500);
 	await page.locator('canvas').click();
 	await page.keyboard.press('Enter');
-	await page.waitForTimeout(350);
+	await page.waitForFunction(
+		() => {
+			const play = window.__icarusGame?.scene.getScene('Play');
+			return play?.children?.list?.some(
+				(c) => c.name === 'gain-helper' && c.type === 'Text',
+			);
+		},
+		undefined,
+		{ timeout: 8000 },
+	);
+	await page.waitForTimeout(200);
 	const layout = await page.evaluate(() => {
 		const play = window.__icarusGame?.scene.getScene('Play');
 		const helper = play.children.list.find(
@@ -3543,7 +3566,17 @@ async function runLandscapeMinText(baseUrl) {
 	const regain = await measureInPage();
 	await page.locator('canvas').click();
 	await page.keyboard.press('Enter');
-	await page.waitForTimeout(350);
+	await page.waitForFunction(
+		() => {
+			const play = window.__icarusGame?.scene.getScene('Play');
+			return play?.children?.list?.some(
+				(c) => c.type === 'Rectangle' && c.depth === 23,
+			);
+		},
+		undefined,
+		{ timeout: 8000 },
+	);
+	await page.waitForTimeout(200);
 	const touchDoneSize = await page.evaluate(() => {
 		const game = window.__icarusGame;
 		const play = game?.scene.getScene('Play');

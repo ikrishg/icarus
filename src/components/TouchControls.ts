@@ -300,7 +300,7 @@ export class TouchControls {
 		this.applyControlsVisible(show);
 
 		for (const { id, pointer, role } of heldPointers) {
-			if (!role) continue;
+			if (!role || !pointer.isDown) continue;
 			if (this.pointerHitsRole(pointer, role)) {
 				this.activeHolds.set(id, role);
 				const slot = this.pointerReleaseHandlers.find((h) => h.role === role);
