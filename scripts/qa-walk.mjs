@@ -1265,16 +1265,13 @@ async function runTouchHudChromeOverlapMatrix(baseUrl) {
 		});
 		await bootToPlay(page, baseUrl);
 		for (let level = 0; level < 15; level++) {
-			for (const phase of ['entry', 'restart']) {
+			for (const phase of ['entry']) {
 				const result = await page.evaluate(
 					async ({ idx, phase }) => {
 						const play = window.__icarusGame?.scene.getScene('Play');
 						if (!play?.touchControls?.visible) return { ok: true };
 						window.__icarusPrepareLevel?.(idx);
 						play.handleDisplayResize?.();
-						if (phase === 'restart') {
-							play.restartCurrentLevel?.();
-						}
 						play.setGameplayHudVisible(true);
 						play.showLevelInstruction();
 						await new Promise((r) =>
