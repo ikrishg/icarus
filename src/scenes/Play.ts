@@ -816,7 +816,7 @@ export class Play extends Scene {
 			return null;
 		}
 		const buttons = this.touchGameplayButtons();
-		for (let tx = maxX; tx >= clusterMin; tx -= 2) {
+		for (let tx = clusterMin; tx <= maxX; tx += 2) {
 			if (ledgeBlocked(tx)) continue;
 			if (!this.touchSpawnMeetsQaHazardMargin(tx, start.y)) continue;
 			if (this.touchSpawnOverlapsButtonsAt(tx, start.y, buttons)) {
@@ -849,7 +849,7 @@ export class Play extends Scene {
 			}
 			return { x: start.x, y: start.y };
 		}
-		for (let tx = maxX; tx >= clusterMin; tx -= 2) {
+		for (let tx = clusterMin; tx <= maxX; tx += 2) {
 			if (ledgeBlocked(tx)) continue;
 			if (!this.touchSpawnMeetsQaHazardMargin(tx, start.y)) continue;
 			if (this.touchSpawnOverlapsButtonsAt(tx, start.y, buttons)) {
