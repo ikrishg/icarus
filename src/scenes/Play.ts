@@ -137,7 +137,6 @@ export class Play extends Scene {
 	private isPaused = false;
 	private portraitBlockerPauseActive = false;
 	private pendingTouchLandscapeSpawn = false;
-	private lastTouchDisplayHeight = 0;
 	private runEndedOnDeath = false;
 
 	constructor() {
@@ -206,6 +205,7 @@ export class Play extends Scene {
 		this.createLivesHud();
 		window.__icarusGetColliders = () => this.colliders.length;
 		window.__icarusGetLives = () => this.lives;
+		window.__icarusTouchChromeMetrics = () => touchChromeMetrics(this);
 		window.__icarusPrepareLevel = (levelIndex: number) => {
 			try {
 				if (!this.scene?.isActive() || !this.player || !this.physics?.world) {
@@ -447,6 +447,18 @@ export class Play extends Scene {
 					this.player.controlsEnabled = true;
 				}
 				this.syncTouchLandscapeSpawnIfNeeded();
+				if (
+					this.touchControls?.visible &&
+					!isPortraitBlockerActive() &&
+					!this.player?.isDead
+				) {
+					const spawn = this.touchSpawnPosition();
+					this.player.setPosition(spawn.x, spawn.y);
+					const body = this.player.sprite.body as
+						| Phaser.Physics.Arcade.Body
+						| undefined;
+					body?.updateFromGameObject();
+				}
 				finishDeath();
 			},
 		});
@@ -656,12 +668,17 @@ export class Play extends Scene {
 
 	private touchSpawnOverlapsCluster(x: number, y: number): boolean {
 		if (!this.touchControls?.visible) return false;
-		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
+		const sprite = this.player.sprite;
+		const prevX = sprite.x;
+		const prevY = sprite.y;
+		sprite.setPosition(x, y);
+		const b = sprite.getBounds();
+		sprite.setPosition(prevX, prevY);
 		const playerRect = {
-			left: x - body.halfWidth,
-			right: x + body.halfWidth,
-			top: y - body.halfHeight,
-			bottom: y + body.halfHeight,
+			left: b.left,
+			right: b.right,
+			top: b.top,
+			bottom: b.bottom,
 		};
 		const buttons = [
 			...(this.touchControls.getLeftMovementButtonBounds?.() ?? []),
@@ -727,7 +744,9 @@ export class Play extends Scene {
 		if (!body) {
 			return { x: start.x, y: start.y };
 		}
-		const clusterMin = this.touchControls.getMinSpawnX(body.halfWidth);
+		const spriteBounds = this.player.sprite.getBounds();
+		const spriteHalfW = (spriteBounds.right - spriteBounds.left) / 2;
+		const clusterMin = this.touchControls.getMinSpawnX(spriteHalfW);
 		const maxX = Math.max(
 			start.x + TOUCH_SPAWN_MAX_DELTA_FROM_START,
 			clusterMin + TOUCH_SPAWN_MAX_DELTA_FROM_START,
@@ -793,16 +812,29 @@ export class Play extends Scene {
 					}
 				}
 			}
-			x = Math.min(x, hazardCap);
-			if (!clusterOk(x) || !ledgeOk(x) || !hazardOk(x)) {
+			if (!clusterOk(x) || !ledgeOk(x)) {
 				let resolved = start.x;
-				for (let tx = Math.min(hazardCap, searchMaxX); tx >= clusterMin; tx -= 8) {
-					if (hazardOk(tx) && ledgeOk(tx) && clusterOk(tx)) {
+				for (let tx = clusterMin; tx <= searchMaxX; tx += 8) {
+					if (ledgeOk(tx) && clusterOk(tx)) {
 						resolved = tx;
 						break;
 					}
 				}
 				x = resolved;
+			} else {
+				x = Math.min(x, hazardCap);
+			}
+			if (!clusterOk(x) || !ledgeOk(x) || !hazardOk(x)) {
+				let resolved = start.x;
+				for (let tx = Math.min(hazardCap, searchMaxX); tx >= clusterMin; tx -= 8) {
+					if (ledgeOk(tx) && clusterOk(tx)) {
+						resolved = tx;
+						break;
+					}
+				}
+				if (clusterOk(resolved)) {
+					x = resolved;
+				}
 			}
 			if (x < clusterMin) {
 				for (let tx = clusterMin; tx <= searchMaxX; tx += 8) {
@@ -849,6 +881,19 @@ export class Play extends Scene {
 					}
 				}
 			}
+			if (this.touchSpawnOverlapsCluster(x, start.y)) {
+				const spriteMaxX = WIDTH - spriteHalfW;
+				for (let tx = clusterMin; tx <= spriteMaxX; tx += 8) {
+					if (!ledgeOk(tx)) continue;
+					if (!this.touchSpawnOverlapsCluster(tx, start.y)) {
+						x = tx;
+						break;
+					}
+				}
+			}
+		}
+		if (this.touchControls?.visible) {
+			x = Math.max(x, clusterMin);
 		}
 		return { x, y: start.y };
 	}
@@ -902,21 +947,13 @@ export class Play extends Scene {
 	};
 
 	handleDisplayResize(): void {
-		const displayH = this.scale.displaySize.height;
-		const viewportShrank =
-			this.lastTouchDisplayHeight > 0 &&
-			displayH < this.lastTouchDisplayHeight - 0.5;
-		this.lastTouchDisplayHeight = displayH;
 		this.touchControls?.relayout();
 		if (!this.isResetting) {
 			this.relayoutTouchChromeHud();
 		}
 		this.syncPortraitBlockerPause();
-		if (
-			viewportShrank &&
-			!this.isResetting &&
-			!this.player?.isDead
-		) {
+		this.syncTouchLandscapeSpawnIfNeeded();
+		if (!this.isResetting && !this.player?.isDead) {
 			this.pushPlayerClearOfTouchButtons();
 		}
 	}
@@ -931,17 +968,25 @@ export class Play extends Scene {
 		];
 		if (buttons.length === 0) return;
 
+		const sprite = this.player.sprite;
 		const overlapsAt = (centerX: number) => {
-			const left = centerX - body.halfWidth;
-			const right = centerX + body.halfWidth;
-			const top = body.top;
-			const bottom = body.bottom;
+			const prevX = sprite.x;
+			sprite.setX(centerX);
+			const b = sprite.getBounds();
+			sprite.setX(prevX);
+			body.updateFromGameObject();
+			const playerRect = {
+				left: b.left,
+				right: b.right,
+				top: b.top,
+				bottom: b.bottom,
+			};
 			return buttons.some(
-				(b) =>
-					left < b.right - 0.5 &&
-					right > b.left + 0.5 &&
-					top < b.bottom &&
-					bottom > b.top,
+				(bn) =>
+					playerRect.left < bn.right - 0.5 &&
+					playerRect.right > bn.left + 0.5 &&
+					playerRect.top < bn.bottom &&
+					playerRect.bottom > bn.top,
 			);
 		};
 

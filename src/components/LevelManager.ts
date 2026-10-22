@@ -290,16 +290,11 @@ export class LevelManager {
 					this.fireballs = this.fireballs.filter((fb) => fb.sprite?.active);
 				};
 
-				const initialSpawn = this.scene.time.delayedCall(delay, spawnFireball);
-				if (this.scene.time.paused) {
-					initialSpawn.paused = true;
-				}
-				this.fireballTimers.push(initialSpawn);
-
 				const timer = this.scene.time.addEvent({
 					delay: interval,
 					callback: spawnFireball,
 					loop: true,
+					startAt: Math.max(0, interval - delay),
 				});
 				if (this.scene.time.paused) {
 					timer.paused = true;

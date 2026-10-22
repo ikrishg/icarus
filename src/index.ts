@@ -8,6 +8,7 @@ declare global {
 		__icarusGetColliders?: () => number;
 		__icarusGetLives?: () => number;
 		__icarusPrepareLevel?: (levelIndex: number) => boolean;
+		__icarusTouchChromeMetrics?: () => import('./util/touchLayout').TouchChromeMetrics;
 	}
 }
 

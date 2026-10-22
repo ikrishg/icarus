@@ -297,7 +297,13 @@ export class TouchControls {
 			.setInteractive({ useHandCursor: false });
 		this.buttonHitAreas.set(role, bg);
 
-		const fontSize = Math.max(36, Math.floor(size * 0.32));
+		const fontSize =
+			role === 'jump'
+				? Math.max(
+						gameFontForMinScreenPx(this.scene, MIN_TOUCH_SCREEN_TEXT_PX),
+						Math.floor(size * 0.5),
+					)
+				: Math.max(36, Math.floor(size * 0.32));
 		const text = this.scene.add
 			.text(x, y, label, {
 				fontFamily: 'Pixelify Sans',
