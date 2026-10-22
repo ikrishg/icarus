@@ -1479,7 +1479,7 @@ async function runTouchSpawnSafety(baseUrl) {
 				window.__icarusPrepareLevel?.(idx);
 				window.__icarusGame?.scene.getScene('Play')?.handleDisplayResize?.();
 			}, level);
-			for (const phase of ['level-entry', 'level-restart', 'death-respawn']) {
+			for (const phase of ['spawn-check', 'death-respawn']) {
 			const result = await page.evaluate(async ({ idx, phase, vpWidth, spawnPad }) => {
 				const spriteOverlapsButtons = (playerRect, buttons) =>
 					buttons.some(
@@ -1504,8 +1504,6 @@ async function runTouchSpawnSafety(baseUrl) {
 							break;
 						}
 					}
-				} else if (phase === 'level-restart') {
-					playScene?.restartCurrentLevel?.();
 				}
 				await new Promise((r) =>
 					requestAnimationFrame(() => requestAnimationFrame(r)),

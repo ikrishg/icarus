@@ -71,20 +71,28 @@ export class LevelManager {
 
 	renderCurrent() {
 		this.portalTrigger = null;
+		try {
+			this.visuals?.clear(true, true);
+		} catch {
+			this.visuals = this.scene.add.group();
+		}
+		try {
+			this.hazards?.clear(true, true);
+		} catch {
+			this.hazards = this.scene.add.group();
+		}
 		if (!this.visuals?.active) {
 			this.visuals = this.scene.add.group();
 		}
 		if (!this.hazards?.active) {
 			this.hazards = this.scene.add.group();
 		}
-		this.visuals.clear(true, true);
-		this.hazards.clear(true, true);
-		if (!this.platforms?.children) {
-			this.platforms = this.scene.physics.add.staticGroup();
-		} else {
-			this.platforms.clear(true, true);
-			this.platforms = this.scene.physics.add.staticGroup();
+		try {
+			this.platforms?.clear(true, true);
+		} catch {
+			// stale static group
 		}
+		this.platforms = this.scene.physics.add.staticGroup();
 
 		// Clear fireballs and timers
 		this.fireballs.forEach((fb) => {
