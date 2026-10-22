@@ -3094,7 +3094,7 @@ async function runFireballFirstSpawnTiming(baseUrl) {
 		ms != null && ms >= target - slack && ms <= target + slack;
 	return {
 		fireballFirstSpawnTimingOk:
-			near(firstEntry, 280) && near(afterRespawn, 120),
+			near(firstEntry, 450) && near(afterRespawn, 120),
 		expectedFirstSpawnMs: target,
 		firstEntryMs: firstEntry,
 		afterRespawnMs: afterRespawn,

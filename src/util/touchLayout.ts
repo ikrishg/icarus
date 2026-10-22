@@ -30,9 +30,10 @@ export function touchChromeMetrics(scene: Scene): TouchChromeMetrics {
 		BASE_MARGIN_GAME_PX,
 		Math.min(48, Math.ceil(BASE_MARGIN_GAME_PX / displayScale)),
 	);
-	const chromeH = Math.min(
-		52,
-		Math.max(44, Math.ceil(MIN_TOUCH_CSS_PX / displayScale)),
+	const minChromeHGamePx = Math.ceil(MIN_TOUCH_CSS_PX / displayScale);
+	const chromeH = Math.max(
+		minChromeHGamePx,
+		Math.min(52, Math.max(44, minChromeHGamePx)),
 	);
 	const chromeW = Math.min(
 		112,
