@@ -875,7 +875,7 @@ export class Play extends Scene {
 		for (let attempt = 0; attempt < 36; attempt++) {
 			const pos = this.pickTouchSpawnAtCurrentLayout();
 			if (pos) {
-				return pos;
+				return this.finalizeTouchSpawnPlacement(pos);
 			}
 			if (!this.touchControls.shrinkLayoutStep()) {
 				break;
@@ -884,9 +884,40 @@ export class Play extends Scene {
 		}
 		const pos = this.pickTouchSpawnAtCurrentLayout();
 		if (pos) {
-			return pos;
+			return this.finalizeTouchSpawnPlacement(pos);
 		}
-		return this.touchSpawnFallbackPosition();
+		return this.finalizeTouchSpawnPlacement(this.touchSpawnFallbackPosition());
+	}
+
+	private finalizeTouchSpawnPlacement(pos: { x: number; y: number }): {
+		x: number;
+		y: number;
+	} {
+		const start = this.levelManager.current.start;
+		const sprB = this.player.sprite.getBounds();
+		const spriteHalfW = (sprB.right - sprB.left) / 2;
+		const clusterMin = this.touchControls!.getMinSpawnX(spriteHalfW);
+		const snapped = this.snapTouchSpawnForQaHazardMargin(pos, clusterMin);
+		this.player.sprite.setPosition(snapped.x, snapped.y);
+		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
+		body.updateFromGameObject();
+		let out = snapped;
+		for (let pass = 0; pass < 8; pass++) {
+			if (this.touchSpawnMeetsQaHazardMargin(out.x, start.y)) {
+				return out;
+			}
+			const nextX = out.x - 2;
+			if (nextX < clusterMin) {
+				break;
+			}
+			out = { x: nextX, y: start.y };
+			this.player.sprite.setPosition(out.x, out.y);
+			body.updateFromGameObject();
+		}
+		if (!this.touchSpawnMeetsQaHazardMargin(out.x, start.y)) {
+			return { x: start.x, y: start.y };
+		}
+		return out;
 	}
 
 	/** Read-only: expected spawn at the current touch layout (no shrink / relayout). */

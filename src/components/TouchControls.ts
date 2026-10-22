@@ -318,7 +318,7 @@ export class TouchControls {
 
 	/** Smallest layout scale while keeping on-screen targets usable (~30 CSS px). */
 	private minLayoutScale(): number {
-		return 0.5;
+		return 0.42;
 	}
 
 	shrinkLayoutStep(): boolean {
