@@ -418,7 +418,13 @@ export class Player {
 
 	setPosition(x: number, y: number) {
 		this.sprite.setPosition(x, y);
-		this.sprite.setVelocity(0, 0);
+		const body = this.sprite.body as Phaser.Physics.Arcade.Body | null;
+		if (body) {
+			body.updateFromGameObject();
+			body.setVelocity(0, 0);
+		} else {
+			this.sprite.setVelocity(0, 0);
+		}
 		this.jumpCount = 0;
 		this.prevBodyCenterX = null;
 	}
