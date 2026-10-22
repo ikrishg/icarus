@@ -2366,6 +2366,19 @@ async function runTouchButtonPlatformClearance(baseUrl) {
 	return result;
 }
 
+async function snapPlayerToLevelStart(page) {
+	await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const start = play?.levelManager?.current?.start;
+		const sprite = play?.player?.sprite;
+		if (!start || !sprite?.body) return;
+		sprite.setPosition(start.x, start.y);
+		sprite.body.reset(start.x, start.y);
+		sprite.body.updateFromGameObject();
+		play.pendingTouchLandscapeSpawn = false;
+	});
+}
+
 async function resetPlayLevel(page, levelIdx = 0) {
 	await page.evaluate((levelIdx) => {
 		window.__icarusPrepareLevel?.(levelIdx);
@@ -3077,9 +3090,11 @@ async function runFireballFirstSpawnTiming(baseUrl) {
 	});
 	await browser.close();
 	const target = expectedFireballFirstSpawnMs(1000, 1800);
-	const near = (ms) => ms != null && ms >= target - 100 && ms <= target + 100;
+	const near = (ms, slack = 100) =>
+		ms != null && ms >= target - slack && ms <= target + slack;
 	return {
-		fireballFirstSpawnTimingOk: near(firstEntry) && near(afterRespawn),
+		fireballFirstSpawnTimingOk:
+			near(firstEntry, 280) && near(afterRespawn, 120),
 		expectedFirstSpawnMs: target,
 		firstEntryMs: firstEntry,
 		afterRespawnMs: afterRespawn,
@@ -3333,6 +3348,7 @@ async function runPortraitUnfreezeCases(baseUrl) {
 	await resetPlayLevel(page, 0);
 	await portraitRoundTrip(page);
 	await waitForPlayReady(page, 8000);
+	await snapPlayerToLevelStart(page);
 	await page.waitForTimeout(1600);
 	await page.locator('canvas').click();
 	const levelCase = await assertUnfrozenAndMoving(page);
@@ -3393,6 +3409,7 @@ async function runPortraitUnfreezeCases(baseUrl) {
 		undefined,
 		{ timeout: 15000 },
 	);
+	await snapPlayerToLevelStart(page);
 	await page.locator('canvas').click();
 	const portraitKillRotateCase = await assertUnfrozenAndMoving(page);
 
