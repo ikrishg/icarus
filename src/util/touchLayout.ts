@@ -43,12 +43,18 @@ export function touchChromeMetrics(scene: Scene): TouchChromeMetrics {
 	const pauseCenterX = margin + chromeW / 2;
 	const pauseCenterY = rowTop + chromeH / 2;
 	const pauseRight = margin + chromeW;
-	const livesTextX = pauseRight + chromeGap;
-	const livesTextY = rowTop + (chromeH - LIVES_LABEL_HEIGHT_GAME_PX) / 2;
-	const hudStackBottom = Math.max(
-		pauseCenterY + chromeH / 2,
-		livesTextY + LIVES_LABEL_HEIGHT_GAME_PX,
-	);
+	const stackLivesBelow =
+		scene.scale.displaySize.height / HEIGHT < 0.31;
+	const livesTextX = stackLivesBelow ? margin : pauseRight + chromeGap;
+	const livesTextY = stackLivesBelow
+		? rowTop + chromeH + chromeGap
+		: rowTop + (chromeH - LIVES_LABEL_HEIGHT_GAME_PX) / 2;
+	const hudStackBottom = stackLivesBelow
+		? livesTextY + LIVES_LABEL_HEIGHT_GAME_PX
+		: Math.max(
+				pauseCenterY + chromeH / 2,
+				livesTextY + LIVES_LABEL_HEIGHT_GAME_PX,
+			);
 	return {
 		margin,
 		chromeW,

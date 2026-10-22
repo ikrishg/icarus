@@ -32,7 +32,6 @@ import {
 	clearanceToHazards,
 	hazardIntervalsForLevel,
 	spriteOverlapsButtons,
-	touchSpawnHazardClearAt,
 	TOUCH_HAZARD_MARGIN_PX,
 	type ButtonRect,
 } from '../util/touchSafeX';
@@ -422,6 +421,7 @@ export class Play extends Scene {
 			this.relayoutTouchChromeHud();
 			this.setGameplayHudVisible(true);
 			this.isResetting = false;
+			this.levelManager.levelStartedAt = this.time.now;
 			if (isPortraitBlockerActive()) {
 				this.portraitBlockerPauseActive = true;
 				this.isPaused = true;
@@ -741,7 +741,23 @@ export class Play extends Scene {
 		this.touchControls.relayout();
 	}
 
-	private pickTouchSpawnAtCurrentLayout(): { x: number; y: number } | null {
+	private touchSpawnSearchMaxX(spriteHalfW: number): number {
+		const start = this.levelManager.current.start;
+		const clusterMin = this.touchControls!.getMinSpawnX(spriteHalfW);
+		const maxDelta = Math.max(
+			72,
+			clusterMin - start.x,
+			clusterMin + 72 - start.x,
+		);
+		return Math.min(
+			WIDTH - spriteHalfW,
+			Math.max(start.x + maxDelta, clusterMin + 72),
+		);
+	}
+
+	private pickTouchSpawnAtCurrentLayout(
+		allowButtonOverlap = false,
+	): { x: number; y: number } | null {
 		const start = this.levelManager.current.start;
 		if (!this.touchControls?.visible || !this.player?.sprite?.body) {
 			return null;
@@ -751,9 +767,9 @@ export class Play extends Scene {
 		const sprB = this.player.sprite.getBounds();
 		const spriteHalfW = (sprB.right - sprB.left) / 2;
 		const clusterMin = this.touchControls.getMinSpawnX(spriteHalfW);
-		const maxX = WIDTH - spriteHalfW;
+		const maxX = this.touchSpawnSearchMaxX(spriteHalfW);
 		const buttons = this.touchGameplayButtons();
-		let hazardWithButtonOverlap: number | null = null;
+		let hazardOverlapFallback: number | null = null;
 		for (let tx = clusterMin; tx <= maxX; tx += 4) {
 			if (ledgeBlocked(tx)) continue;
 			if (
@@ -763,49 +779,28 @@ export class Play extends Scene {
 				continue;
 			}
 			if (this.touchSpawnOverlapsButtonsAt(tx, start.y, buttons)) {
-				if (hazardWithButtonOverlap == null) {
-					hazardWithButtonOverlap = tx;
+				if (allowButtonOverlap && hazardOverlapFallback == null) {
+					hazardOverlapFallback = tx;
 				}
 				continue;
 			}
 			return { x: Math.round(tx), y: start.y };
 		}
-		if (hazardWithButtonOverlap != null) {
+		if (allowButtonOverlap && hazardOverlapFallback != null) {
 			return {
-				x: Math.round(hazardWithButtonOverlap),
+				x: Math.round(hazardOverlapFallback),
 				y: start.y,
 			};
 		}
 		return null;
 	}
 
-	resolveTouchSpawnPlacement(): { x: number; y: number } {
+	private touchSpawnFallbackPosition(): { x: number; y: number } {
 		const start = this.levelManager.current.start;
-		if (!this.touchControls?.visible) {
-			return { x: start.x, y: start.y };
-		}
-		if (!this.player?.sprite?.body) {
-			return { x: start.x, y: start.y };
-		}
-		this.refreshTouchSpawnLayout();
-		for (let attempt = 0; attempt < 24; attempt++) {
-			const pos = this.pickTouchSpawnAtCurrentLayout();
-			if (pos) {
-				return pos;
-			}
-			if (!this.touchControls.shrinkLayoutStep()) {
-				break;
-			}
-			this.touchControls.relayout();
-		}
-		const pos = this.pickTouchSpawnAtCurrentLayout();
-		if (pos) {
-			return pos;
-		}
 		const sprB = this.player.sprite.getBounds();
 		const spriteHalfW = (sprB.right - sprB.left) / 2;
-		const clusterMin = this.touchControls.getMinSpawnX(spriteHalfW);
-		const maxX = WIDTH - spriteHalfW;
+		const clusterMin = this.touchControls!.getMinSpawnX(spriteHalfW);
+		const maxX = this.touchSpawnSearchMaxX(spriteHalfW);
 		const ledgeBlocked = (tx: number) =>
 			this.touchSpawnBlockedAt(tx, start.y);
 		for (let tx = clusterMin; tx <= maxX; tx += 4) {
@@ -823,6 +818,36 @@ export class Play extends Scene {
 		};
 	}
 
+	resolveTouchSpawnPlacement(): { x: number; y: number } {
+		const start = this.levelManager.current.start;
+		if (!this.touchControls?.visible) {
+			return { x: start.x, y: start.y };
+		}
+		if (!this.player?.sprite?.body) {
+			return { x: start.x, y: start.y };
+		}
+		this.refreshTouchSpawnLayout();
+		for (let attempt = 0; attempt < 24; attempt++) {
+			const pos = this.pickTouchSpawnAtCurrentLayout(false);
+			if (pos) {
+				return pos;
+			}
+			if (!this.touchControls.shrinkLayoutStep()) {
+				break;
+			}
+			this.touchControls.relayout();
+		}
+		const strict = this.pickTouchSpawnAtCurrentLayout(false);
+		if (strict) {
+			return strict;
+		}
+		const relaxed = this.pickTouchSpawnAtCurrentLayout(true);
+		if (relaxed) {
+			return relaxed;
+		}
+		return this.touchSpawnFallbackPosition();
+	}
+
 	/** Read-only: expected spawn at the current touch layout (no shrink / relayout). */
 	touchSpawnPosition(): { x: number; y: number } {
 		const start = this.levelManager.current.start;
@@ -832,8 +857,10 @@ export class Play extends Scene {
 		if (!this.player?.sprite?.body) {
 			return { x: start.x, y: start.y };
 		}
-		const pos = this.pickTouchSpawnAtCurrentLayout();
-		return pos ?? { x: start.x, y: start.y };
+		const pos =
+			this.pickTouchSpawnAtCurrentLayout(false) ??
+			this.pickTouchSpawnAtCurrentLayout(true);
+		return pos ?? this.touchSpawnFallbackPosition();
 	}
 
 	resetPlayer() {

@@ -2835,8 +2835,9 @@ async function runTouchChromeLivesGap(baseUrl) {
 			const horizGap = lives.left - pause.right;
 			const rowAligned =
 				lives.top >= pause.top - 6 && lives.bottom <= pause.bottom + 6;
+			const stackBelow = lives.top >= pause.bottom - 4;
 			return {
-				ok: horizGap >= 8 && rowAligned,
+				ok: stackBelow || (horizGap >= 8 && rowAligned),
 				horizGap,
 				rowAligned,
 				pauseRight: pause.right,
@@ -3275,19 +3276,6 @@ async function runPortraitUnfreezeCases(baseUrl) {
 	await waitForPlayReady(page, 8000);
 	await page.waitForTimeout(1600);
 	await page.locator('canvas').click();
-	await page.evaluate(() => {
-		const play = window.__icarusGame?.scene.getScene('Play');
-		if (!play?.player) return;
-		play.syncPortraitBlockerPause?.();
-		const spawn = play.touchSpawnPosition();
-		play.player.revive(spawn.x, spawn.y);
-		play.player.controlsEnabled = true;
-		const body = play.player.sprite.body;
-		if (body) {
-			body.enable = true;
-			body.setAllowGravity(true);
-		}
-	});
 	const levelCase = await assertUnfrozenAndMoving(page);
 
 	// Portal transition: rotate during the 500ms level-complete delay
