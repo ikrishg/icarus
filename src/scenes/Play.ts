@@ -330,7 +330,12 @@ export class Play extends Scene {
 				if (!this.deathSequence?.isEscBlocked()) {
 					this.setGameplayClockPaused(true);
 				}
-			} else if (this.portraitBlockerPauseActive) {
+			} else if (
+				this.portraitBlockerPauseActive ||
+				(this.isPaused &&
+					!this.pausePanel &&
+					!isPortraitBlockerActive())
+			) {
 				this.syncPortraitBlockerPause();
 			}
 		}
@@ -935,14 +940,19 @@ export class Play extends Scene {
 			this.isResetting ||
 			this.player?.isDead ||
 			this.deathSequence?.isEscBlocked();
+		const canResumeGameplay =
+			!this.pausePanel && !deathOrReset;
 		if (
-			wasPortraitPause &&
-			!deathOrReset &&
-			(this.isPaused || world.isPaused)
+			canResumeGameplay &&
+			(wasPortraitPause || this.isPaused || world.isPaused)
 		) {
 			this.isPaused = false;
-			this.physics.resume();
-			this.setGameplayClockPaused(false);
+			if (world.isPaused) {
+				this.physics.resume();
+			}
+			if (this.time.paused) {
+				this.setGameplayClockPaused(false);
+			}
 		}
 		this.syncTouchLandscapeSpawnIfNeeded();
 	}

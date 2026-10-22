@@ -3293,6 +3293,10 @@ async function runPortraitUnfreezeCases(baseUrl) {
 	});
 	await page.waitForTimeout(2000);
 	await page.setViewportSize({ width: 844, height: 390 });
+	await page.evaluate(() => {
+		window.dispatchEvent(new Event('resize'));
+		window.visualViewport?.dispatchEvent(new Event('resize'));
+	});
 	await page.waitForTimeout(1200);
 	await page.waitForFunction(
 		() => {
