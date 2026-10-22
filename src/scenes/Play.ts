@@ -319,7 +319,12 @@ export class Play extends Scene {
 
 	update() {
 		if (isTouchDevice(this)) {
-			if (isPortraitBlockerActive() && !this.pausePanel) {
+			if (
+				isPortraitBlockerActive() &&
+				!this.pausePanel &&
+				!this.isResetting &&
+				!this.deathSequence?.isEscBlocked()
+			) {
 				if (!this.portraitBlockerPauseActive) {
 					this.portraitBlockerPauseActive = true;
 				}
@@ -327,9 +332,7 @@ export class Play extends Scene {
 				if (!this.physics.world.isPaused) {
 					this.physics.pause();
 				}
-				if (!this.deathSequence?.isEscBlocked()) {
-					this.setGameplayClockPaused(true);
-				}
+				this.setGameplayClockPaused(true);
 			} else if (
 				this.portraitBlockerPauseActive ||
 				(this.isPaused &&
@@ -921,14 +924,15 @@ export class Play extends Scene {
 		if (!world) return;
 		if (isPortraitBlockerActive()) {
 			if (this.pausePanel) return;
+			if (this.isResetting || this.deathSequence?.isEscBlocked()) {
+				return;
+			}
 			this.portraitBlockerPauseActive = true;
 			this.isPaused = true;
 			if (!world.isPaused) {
 				this.physics.pause();
 			}
-			if (!this.deathSequence?.isEscBlocked() && !this.isResetting) {
-				this.setGameplayClockPaused(true);
-			}
+			this.setGameplayClockPaused(true);
 			return;
 		}
 		if (this.pausePanel) {
