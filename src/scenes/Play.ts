@@ -741,6 +741,20 @@ export class Play extends Scene {
 			this.touchControls.relayout();
 		}
 		const clusterMin = this.touchControls.getMinSpawnX(spriteHalfW);
+		const hazardOnly = findSafeTouchCenterX({
+			startX: Math.max(start.x, clusterMin),
+			clusterMinX: clusterMin,
+			maxX: WIDTH - spriteHalfW,
+			spawnY: start.y,
+			spriteHalfW,
+			spriteHalfH,
+			level,
+			buttons: [],
+			ledgeBlocked: (tx) => !ledgeOk(tx),
+		});
+		if (hazardOnly != null) {
+			return { x: hazardOnly, y: start.y };
+		}
 		x = Math.max(x, clusterMin);
 		return { x, y: start.y };
 	}
