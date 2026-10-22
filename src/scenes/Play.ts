@@ -35,6 +35,9 @@ import {
 	TOUCH_HAZARD_MARGIN_PX,
 	type ButtonRect,
 } from '../util/touchSafeX';
+
+/** Placement uses a hair above QA's 96px assert to absorb bounds rounding. */
+const TOUCH_SPAWN_HAZARD_MIN_PX = TOUCH_HAZARD_MARGIN_PX + 2;
 import { isDebugPlayEnabled } from '../util/debug';
 
 import { sanitizePixelFont } from '../util/text';
@@ -769,7 +772,7 @@ export class Play extends Scene {
 			this.levelManager.current,
 			spawnY,
 		)) {
-			const capped = h.left - TOUCH_HAZARD_MARGIN_PX - spriteHalfW;
+			const capped = h.left - TOUCH_SPAWN_HAZARD_MIN_PX - spriteHalfW;
 			maxX = Math.min(maxX, capped);
 		}
 		return maxX;
@@ -793,11 +796,11 @@ export class Play extends Scene {
 		}
 		const buttons = this.touchGameplayButtons();
 		let hazardOverlapFallback: number | null = null;
-		for (let tx = clusterMin; tx <= maxX; tx += 4) {
+		for (let tx = clusterMin; tx <= maxX; tx += 2) {
 			if (ledgeBlocked(tx)) continue;
 			if (
 				this.touchSpawnHazardMarginAt(tx, start.y) <
-				TOUCH_HAZARD_MARGIN_PX
+				TOUCH_SPAWN_HAZARD_MIN_PX
 			) {
 				continue;
 			}
@@ -836,11 +839,11 @@ export class Play extends Scene {
 			}
 			return { x: start.x, y: start.y };
 		}
-		for (let tx = clusterMin; tx <= maxX; tx += 4) {
+		for (let tx = clusterMin; tx <= maxX; tx += 2) {
 			if (ledgeBlocked(tx)) continue;
 			if (
 				this.touchSpawnHazardMarginAt(tx, start.y) >=
-				TOUCH_HAZARD_MARGIN_PX
+				TOUCH_SPAWN_HAZARD_MIN_PX
 			) {
 				return { x: Math.round(tx), y: start.y };
 			}
