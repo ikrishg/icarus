@@ -426,8 +426,7 @@ export class Play extends Scene {
 			this.setGameplayHudVisible(true);
 			this.isResetting = false;
 			if (this.levelManager.deferLevelClockReset) {
-				this.levelManager.levelStartedAt = this.time.now;
-				this.levelManager.deferLevelClockReset = false;
+				this.levelManager.applyDeferredLevelStartClock();
 			}
 			if (isPortraitBlockerActive()) {
 				this.portraitBlockerPauseActive = true;
@@ -1632,6 +1631,8 @@ export class Play extends Scene {
 			this.player.controlsEnabled = true;
 			this.touchControls?.setGameplayVisible(true);
 			this.setGameplayHudVisible(true);
+			this.touchControls?.relayout();
+			this.relayoutTouchChromeHud();
 
 			this.input.keyboard?.off('keydown', keyHandler);
 
@@ -1658,6 +1659,7 @@ export class Play extends Scene {
 				this.showLevelInstruction();
 				this.isResetting = false;
 				this.syncPortraitBlockerPause();
+				this.handleDisplayResize();
 			}
 		};
 

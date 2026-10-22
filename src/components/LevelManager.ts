@@ -117,7 +117,6 @@ export class LevelManager {
 		if (play?.isResetting) {
 			this.deferLevelClockReset = true;
 		} else {
-			this.levelStartedAt = this.scene.time.now;
 			this.deferLevelClockReset = false;
 		}
 
@@ -305,32 +304,50 @@ export class LevelManager {
 					},
 				});
 			} else if (o.type === 'fireball') {
-				// Spawn fireballs at intervals
-				const delay = o.delay || 0;
-				const interval = o.interval || 2000;
-
-				const spawnFireball = () => {
-					const fireball = new Fireball(this.scene, o.x, o.y);
-					this.fireballs.push(fireball);
-					this.hazards.add(fireball.sprite);
-
-					// Clean up destroyed fireballs
-					this.fireballs = this.fireballs.filter((fb) => fb.sprite?.active);
-				};
-
-				const timer = this.scene.time.addEvent({
-					delay: interval,
-					callback: spawnFireball,
-					loop: true,
-					startAt: Math.max(0, interval - delay),
-				});
-				if (this.scene.time.paused) {
-					timer.paused = true;
+				if (!this.deferLevelClockReset) {
+					this.addFireballTimer(o);
 				}
-
-				this.fireballTimers.push(timer);
 			}
 		});
+
+		if (!this.deferLevelClockReset) {
+			this.levelStartedAt = this.scene.time.now;
+		}
+	}
+
+	/** After death reset, align fireball spawns with levelStartedAt. */
+	applyDeferredLevelStartClock(): void {
+		if (!this.deferLevelClockReset) return;
+		this.deferLevelClockReset = false;
+		this.levelStartedAt = this.scene.time.now;
+		for (const o of this.current.obstacles) {
+			if (o.type === 'fireball') {
+				this.addFireballTimer(o);
+			}
+		}
+	}
+
+	private addFireballTimer(o: ObstacleDef & { type: 'fireball' }): void {
+		const delay = o.delay || 0;
+		const interval = o.interval || 2000;
+
+		const spawnFireball = () => {
+			const fireball = new Fireball(this.scene, o.x, o.y);
+			this.fireballs.push(fireball);
+			this.hazards.add(fireball.sprite);
+			this.fireballs = this.fireballs.filter((fb) => fb.sprite?.active);
+		};
+
+		const timer = this.scene.time.addEvent({
+			delay: interval,
+			callback: spawnFireball,
+			loop: true,
+			startAt: Math.max(0, interval - delay),
+		});
+		if (this.scene.time.paused) {
+			timer.paused = true;
+		}
+		this.fireballTimers.push(timer);
 	}
 
 	private addTiledGroundVisual(

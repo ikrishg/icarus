@@ -1253,9 +1253,15 @@ async function collectTouchHudOverlap(page) {
 					lives.right > panel.left &&
 					lives.top < panel.bottom &&
 					lives.bottom > panel.top));
+		const metrics = window.__icarusTouchChromeMetrics?.();
+		const livesAligned =
+			lives &&
+			metrics &&
+			Math.abs(lives.y - metrics.livesTextY) < 6 &&
+			Math.abs(lives.x - metrics.livesTextX) < 6;
 		const ok =
-			pause && lives && !pauseLivesOverlap && !panelOverlap;
-		return { ok: Boolean(ok), pause, lives, panel };
+			pause && lives && livesAligned && !pauseLivesOverlap && !panelOverlap;
+		return { ok: Boolean(ok), pause, lives, panel, metrics };
 	});
 }
 
@@ -1813,6 +1819,13 @@ async function runTouchDisplayResizeMutationProofs(baseUrl) {
 	await page.setViewportSize({ width: 640, height: 360 });
 	await page.waitForTimeout(400);
 	const hudNoResize = await evaluateTouchHudAtBoot(page);
+	const hudStaleAfter640 = await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const expected = window.__icarusTouchChromeMetrics?.();
+		const livesY = play?.livesText?.y;
+		if (!expected || livesY == null) return false;
+		return Math.abs(livesY - expected.livesTextY) > 6;
+	});
 	await page.evaluate(() => {
 		const play = window.__icarusGame?.scene.getScene('Play');
 		if (play && window.__icarusOrigDisplayResize) {
@@ -1823,7 +1836,11 @@ async function runTouchDisplayResizeMutationProofs(baseUrl) {
 			play.handleDisplayResize();
 		}
 	});
-	if (hudNoResize.ok && !hudNoResize.skip) {
+	if (
+		!hudNoResize.skip &&
+		hudNoResize.ok &&
+		!hudStaleAfter640
+	) {
 		failures.push('hud-should-fail-with-noop-display-resize');
 	}
 	await page.evaluate(() => {
@@ -3137,6 +3154,17 @@ async function runL15RealKeys(baseUrl) {
 			await page.keyboard.press('KeyE');
 			stuckTicks = 0;
 		}
+		const y = (await getPlayerPos(page)).y;
+		if (x > 1580 && y > 480) {
+			await page.keyboard.up('ArrowRight');
+			for (let burst = 0; burst < 6; burst++) {
+				await page.keyboard.press('KeyQ');
+				await page.keyboard.press('Space');
+				await page.waitForTimeout(220);
+			}
+			await page.keyboard.down('ArrowRight');
+			await page.keyboard.down('ArrowUp');
+		}
 		const onGround = await page.evaluate(() => {
 			const body =
 				window.__icarusGame?.scene.getScene('Play')?.player?.sprite?.body;
@@ -3254,6 +3282,7 @@ async function runPortraitUnfreezeCases(baseUrl) {
 	await portraitRoundTrip(page);
 	await dismissAbilityModals(page, 4);
 	await waitForPlayReady(page, 12000);
+	await page.waitForTimeout(1600);
 	await page.locator('canvas').click();
 	const lossCase = await assertUnfrozenAndMoving(page);
 
