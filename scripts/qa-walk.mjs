@@ -667,10 +667,6 @@ async function holdTouchLeft(page, ms = 2500) {
 }
 
 async function assertUnfrozenAndMoving(page) {
-	await page.evaluate(() => {
-		window.__icarusGame?.scene.getScene('Play')?.handleDisplayResize?.();
-	});
-	await page.waitForTimeout(150);
 	const state = await page.evaluate(() => {
 		const play = window.__icarusGame?.scene.getScene('Play');
 		return {
@@ -682,6 +678,10 @@ async function assertUnfrozenAndMoving(page) {
 	if (state.scenePaused || state.physicsPaused || state.pausePanel) {
 		return { ok: false, reason: 'frozen', state };
 	}
+	await page.evaluate(() => {
+		window.__icarusGame?.scene.getScene('Play')?.handleDisplayResize?.();
+	});
+	await page.waitForTimeout(150);
 	const before = await getPlayerPos(page);
 	await holdTouchRight(page, 2200);
 	const after = await getPlayerPos(page);
@@ -2498,6 +2498,22 @@ async function runFireballPauseStack(baseUrl) {
 		);
 		return { active, timersPaused, clockPaused: Boolean(play?.time?.paused) };
 	});
+	const spawnedAfterResume = await page.evaluate(async () => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const start =
+			play?.levelManager?.fireballs?.filter((f) => f.sprite?.active)
+				.length ?? 0;
+		for (let i = 0; i < 100; i++) {
+			await new Promise((r) => setTimeout(r, 25));
+			const n =
+				play?.levelManager?.fireballs?.filter((f) => f.sprite?.active)
+					.length ?? 0;
+			if (n > start) {
+				return { ok: true, start, after: n };
+			}
+		}
+		return { ok: false, start };
+	});
 	await browser.close();
 	return {
 		fireballPauseStackOk:
@@ -2506,7 +2522,8 @@ async function runFireballPauseStack(baseUrl) {
 			pausedCount.clockPaused &&
 			!afterResume.timersPaused &&
 			!afterResume.clockPaused &&
-			afterResume.active <= pausedCount.active + 1,
+			spawnedAfterResume.ok,
+		spawnedAfterResume,
 		activeFireballs: afterResume.active,
 		pausedCount,
 		afterResume,
@@ -3205,9 +3222,6 @@ async function runPortraitUnfreezeCases(baseUrl) {
 	await page.waitForTimeout(2600);
 	await page.setViewportSize({ width: 844, height: 390 });
 	await page.waitForTimeout(600);
-	await page.evaluate(() => {
-		window.__icarusGame?.scene.getScene('Play')?.handleDisplayResize?.();
-	});
 	await page.waitForFunction(
 		() => {
 			const play = window.__icarusGame?.scene.getScene('Play');
