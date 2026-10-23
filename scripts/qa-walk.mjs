@@ -3078,7 +3078,11 @@ async function runFireballFirstSpawnTiming(baseUrl) {
 	const firstEntry = await page.evaluate(async () => {
 		window.__icarusPrepareLevel?.(5);
 		const play = window.__icarusGame?.scene.getScene('Play');
-		play?.levelManager?.syncFireballSpawnClock?.();
+		if (play) {
+			play.isResetting = false;
+			play.levelManager.deferLevelClockReset = false;
+			play.levelManager.syncFireballSpawnClock?.();
+		}
 		await new Promise((r) =>
 			requestAnimationFrame(() => requestAnimationFrame(r)),
 		);

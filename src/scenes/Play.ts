@@ -910,6 +910,7 @@ export class Play extends Scene {
 		let out = snapped;
 		for (let pass = 0; pass < 8; pass++) {
 			if (this.touchSpawnMeetsQaHazardMargin(out.x, start.y)) {
+				out.x = Math.max(out.x, clusterMin);
 				return out;
 			}
 			const nextX = out.x - 2;
@@ -921,8 +922,9 @@ export class Play extends Scene {
 			body.updateFromGameObject();
 		}
 		if (!this.touchSpawnMeetsQaHazardMargin(out.x, start.y)) {
-			return { x: start.x, y: start.y };
+			return { x: Math.max(start.x, clusterMin), y: start.y };
 		}
+		out.x = Math.max(out.x, clusterMin);
 		return out;
 	}
 
