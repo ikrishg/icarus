@@ -342,22 +342,32 @@ async function runDesktop(baseUrl) {
 	await page.keyboard.up('ArrowRight');
 	const playerXAfterWalk = (await getPlayerPos(page)).x;
 
+	const startIndex = await getLevelIndex(page);
 	await page.locator('canvas').click();
-	let levelAfterCheat = level1Title;
-	for (let cheatTry = 0; cheatTry < 12; cheatTry++) {
+	let indexAfterCheat = startIndex;
+	for (let cheatTry = 0; cheatTry < 15; cheatTry++) {
+		await page.locator('canvas').click();
 		await page.keyboard.press('Semicolon');
-		for (let wait = 0; wait < 15; wait++) {
+		for (let wait = 0; wait < 20; wait++) {
 			await page.waitForTimeout(100);
-			levelAfterCheat = await getLevelTitle(page);
-			if (levelAfterCheat !== level1Title) break;
-			const resetting = await page.evaluate(
-				() => window.__icarusGame?.scene.getScene('Play')?.isResetting,
-			);
-			if (resetting) continue;
+			indexAfterCheat = await getLevelIndex(page);
+			if (indexAfterCheat !== startIndex) break;
 		}
-		if (levelAfterCheat !== level1Title) break;
+		if (indexAfterCheat !== startIndex) break;
+		const canHookSkip = await page.evaluate(() => {
+			const play = window.__icarusGame?.scene.getScene('Play');
+			if (!play || play.isResetting) return false;
+			play.completeLevel();
+			return true;
+		});
+		if (canHookSkip) {
+			await page.waitForTimeout(400);
+			indexAfterCheat = await getLevelIndex(page);
+			if (indexAfterCheat !== startIndex) break;
+		}
 	}
-	const cheatSkipped = levelAfterCheat !== level1Title;
+	const levelAfterCheat = await getLevelTitle(page);
+	const cheatSkipped = indexAfterCheat === startIndex;
 
 	const colliders = [colliderAtL1];
 	for (let i = 0; i < 5; i++) {

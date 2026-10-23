@@ -928,6 +928,7 @@ export class Play extends Scene {
 		if (!this.player?.sprite?.body) {
 			return { x: start.x, y: start.y };
 		}
+		this.refreshTouchSpawnLayout();
 		return (
 			this.pickTouchSpawnAtCurrentLayout() ??
 			this.touchSpawnFallbackPosition()
@@ -994,9 +995,28 @@ export class Play extends Scene {
 		this.syncPortraitBlockerPause();
 		this.syncTouchLandscapeSpawnIfNeeded();
 		if (!this.isResetting && !this.player?.isDead) {
+			this.alignPlayerToTouchSpawnAfterLayoutChange();
 			this.repositionTouchSpawnIfOverlappingButtons();
 			this.schedulePushClearOfTouchButtons();
 		}
+	}
+
+	/** After orientation/size changes, snap spawn if layout no longer matches the player. */
+	private alignPlayerToTouchSpawnAfterLayoutChange(): void {
+		if (!this.touchControls?.visible || !this.player?.sprite?.body) {
+			return;
+		}
+		this.refreshTouchSpawnLayout();
+		const want =
+			this.pickTouchSpawnAtCurrentLayout() ??
+			this.touchSpawnFallbackPosition();
+		if (Math.abs(this.player.sprite.x - want.x) <= 8) {
+			return;
+		}
+		const placed = this.resolveTouchSpawnPlacement();
+		this.player.setPosition(placed.x, placed.y);
+		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
+		body.updateFromGameObject();
 	}
 
 	private repositionTouchSpawnIfOverlappingButtons(): void {
