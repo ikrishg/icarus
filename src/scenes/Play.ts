@@ -137,8 +137,6 @@ export class Play extends Scene {
 	private isPaused = false;
 	private portraitBlockerPauseActive = false;
 	private pendingTouchLandscapeSpawn = false;
-	/** After death revive, force touch spawn sync once landscape layout is active. */
-	private touchLandscapeSpawnSyncAfterDeath = false;
 	private runEndedOnDeath = false;
 	private resizePushGeneration = 0;
 	private resizePushTimer?: Phaser.Time.TimerEvent;
@@ -466,11 +464,6 @@ export class Play extends Scene {
 			onComplete: () => {
 				if (this.player) {
 					this.player.controlsEnabled = true;
-				}
-				if (this.touchControls?.visible) {
-					this.touchLandscapeSpawnSyncAfterDeath = true;
-					this.pendingTouchLandscapeSpawn = true;
-					this.syncTouchLandscapeSpawnIfNeeded(true);
 				}
 				finishDeath();
 			},
@@ -1014,13 +1007,14 @@ export class Play extends Scene {
 			this.touchControls?.visible &&
 			portraitBlockerWasActive &&
 			!isPortraitBlockerActive();
-		if (leavingPortrait) {
-			this.pendingTouchLandscapeSpawn = true;
-		}
 		this.syncPortraitBlockerPause();
-		if (this.touchLandscapeSpawnSyncAfterDeath) {
-			this.touchLandscapeSpawnSyncAfterDeath = false;
-			this.requestTouchSpawnLandscapeSync();
+		if (leavingPortrait) {
+			if (!this.touchResizePreservesPlayerProgress()) {
+				this.requestTouchSpawnLandscapeSync();
+			} else {
+				this.pendingTouchLandscapeSpawn = true;
+				this.syncTouchLandscapeSpawnIfNeeded();
+			}
 		} else {
 			this.syncTouchLandscapeSpawnIfNeeded();
 		}
