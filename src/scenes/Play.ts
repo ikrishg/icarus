@@ -137,6 +137,8 @@ export class Play extends Scene {
 	private isPaused = false;
 	private portraitBlockerPauseActive = false;
 	private pendingTouchLandscapeSpawn = false;
+	/** After death revive, force touch spawn sync once landscape layout is active. */
+	private touchLandscapeSpawnSyncAfterDeath = false;
 	private runEndedOnDeath = false;
 	private resizePushGeneration = 0;
 	private resizePushTimer?: Phaser.Time.TimerEvent;
@@ -465,7 +467,11 @@ export class Play extends Scene {
 				if (this.player) {
 					this.player.controlsEnabled = true;
 				}
-				this.syncTouchLandscapeSpawnIfNeeded();
+				if (this.touchControls?.visible) {
+					this.touchLandscapeSpawnSyncAfterDeath = true;
+					this.pendingTouchLandscapeSpawn = true;
+					this.syncTouchLandscapeSpawnIfNeeded(true);
+				}
 				finishDeath();
 			},
 		});
@@ -1004,15 +1010,20 @@ export class Play extends Scene {
 		this.touchControls?.relayout();
 		this.relayoutTouchChromeHud();
 		this.relayoutLevelInstructionIfVisible();
-		this.syncPortraitBlockerPause();
-		if (
+		const leavingPortrait =
 			this.touchControls?.visible &&
 			portraitBlockerWasActive &&
-			!isPortraitBlockerActive()
-		) {
+			!isPortraitBlockerActive();
+		if (leavingPortrait) {
 			this.pendingTouchLandscapeSpawn = true;
 		}
-		this.syncTouchLandscapeSpawnIfNeeded();
+		this.syncPortraitBlockerPause();
+		if (this.touchLandscapeSpawnSyncAfterDeath) {
+			this.touchLandscapeSpawnSyncAfterDeath = false;
+			this.requestTouchSpawnLandscapeSync();
+		} else {
+			this.syncTouchLandscapeSpawnIfNeeded();
+		}
 		if (!this.isResetting && !this.player?.isDead) {
 			this.repositionTouchSpawnIfOverlappingButtons();
 			this.schedulePushClearOfTouchButtons();
@@ -1727,6 +1738,7 @@ export class Play extends Scene {
 			if (event.code === 'ArrowLeft' || event.code === 'KeyA') {
 				selectedIndex = Math.max(0, selectedIndex - 1);
 				updateSelection();
+			} else if (event.code === 'ArrowRight' || event.code === 'KeyD') {
 				selectedIndex = Math.min(buttons.length - 1, selectedIndex + 1);
 				updateSelection();
 			} else if (event.code === 'ArrowUp' || event.code === 'KeyW') {
