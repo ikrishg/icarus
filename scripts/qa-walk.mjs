@@ -747,6 +747,9 @@ async function assertUnfrozenAndMoving(page) {
 async function portraitRoundTrip(page) {
 	await page.setViewportSize({ width: 390, height: 844 });
 	await page.waitForTimeout(500);
+	await page.evaluate(() => {
+		window.__icarusGame?.scene.getScene('Play')?.handleDisplayResize?.();
+	});
 	await page.setViewportSize({ width: 844, height: 390 });
 	await page.waitForTimeout(600);
 	await page.evaluate(() => {
