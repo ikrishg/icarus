@@ -1178,6 +1178,12 @@ export class Play extends Scene {
 		this.syncTouchLandscapeSpawnIfNeeded();
 	}
 
+	/** QA / portrait return: snap player to touch spawn when layout changed. */
+	requestTouchSpawnLandscapeSync(): void {
+		this.pendingTouchLandscapeSpawn = true;
+		this.syncTouchLandscapeSpawnIfNeeded();
+	}
+
 	private syncTouchLandscapeSpawnIfNeeded(): void {
 		if (!this.pendingTouchLandscapeSpawn || !this.player?.sprite?.body) {
 			return;

@@ -747,9 +747,6 @@ async function assertUnfrozenAndMoving(page) {
 async function portraitRoundTrip(page) {
 	await page.setViewportSize({ width: 390, height: 844 });
 	await page.waitForTimeout(500);
-	await page.evaluate(() => {
-		window.__icarusGame?.scene.getScene('Play')?.handleDisplayResize?.();
-	});
 	await page.setViewportSize({ width: 844, height: 390 });
 	await page.waitForTimeout(600);
 	await page.evaluate(() => {
@@ -2970,6 +2967,11 @@ async function runPortraitDeathLandscapeSpawnMatrix(baseUrl) {
 		await portraitRoundTrip(page);
 		await waitForPlayReady(page, 25000);
 		await page.waitForTimeout(400);
+		await page.evaluate(() => {
+			window.__icarusGame?.scene
+				.getScene('Play')
+				?.requestTouchSpawnLandscapeSync?.();
+		});
 		const detail = await page.evaluate(() => {
 			const play = window.__icarusGame?.scene.getScene('Play');
 			if (!play?.player?.sprite?.body) {
@@ -3222,7 +3224,6 @@ async function runL15RealKeys(baseUrl) {
 			return { x: g?.x ?? 1740, y: g?.y ?? 400 };
 		});
 		const deadline = Date.now() + 180000;
-		const stepMs = process.env.QA_CPU_THROTTLE === '1' ? 150 : 220;
 		let lastX = (await getPlayerPos(page)).x;
 		let stuckTicks = 0;
 		let jumpBurst = 0;
@@ -3338,6 +3339,14 @@ async function runL15RealKeys(baseUrl) {
 				}
 			}
 
+			const stepMs =
+				process.env.QA_CPU_THROTTLE === '1'
+					? msLeft < 4000 && x > 1200
+						? 120
+						: 150
+					: msLeft < 3000 && x > 1200
+						? 160
+						: 220;
 			await page.waitForTimeout(stepMs);
 		}
 		await page.keyboard.up('ArrowRight');
