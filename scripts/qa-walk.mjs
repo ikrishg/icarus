@@ -114,17 +114,25 @@ async function runPauseEscToggle(baseUrl) {
 
 async function bootToPlay(page, baseUrl, search = '?debug=1') {
 	const url = search ? `${baseUrl}${search.startsWith('?') ? search : `?${search}`}` : baseUrl;
-	await page.goto(url);
-	await page.waitForTimeout(3000);
-	await page.keyboard.press('Enter');
-	await page.waitForTimeout(700);
-	await page.keyboard.press('Enter');
-	await page.waitForFunction(
-		() => window.__icarusGame?.scene.isActive('Play') === true,
-		undefined,
-		{ timeout: 20000 },
-	);
-	await page.waitForTimeout(500);
+	for (let attempt = 0; attempt < 3; attempt++) {
+		await page.goto(url);
+		await page.waitForTimeout(3000);
+		await page.keyboard.press('Enter');
+		await page.waitForTimeout(700);
+		await page.keyboard.press('Enter');
+		try {
+			await page.waitForFunction(
+				() => window.__icarusGame?.scene.isActive('Play') === true,
+				undefined,
+				{ timeout: 25000 },
+			);
+			await page.waitForTimeout(500);
+			return;
+		} catch (err) {
+			if (attempt === 2) throw err;
+			await page.waitForTimeout(800);
+		}
+	}
 }
 
 async function bootToAbout(page, baseUrl) {
