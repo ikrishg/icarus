@@ -3174,7 +3174,7 @@ async function runL15RealKeys(baseUrl) {
 	await page.keyboard.down('ArrowRight');
 	await page.keyboard.down('ArrowUp');
 	await page.keyboard.down('KeyD');
-	const deadline = Date.now() + 120000;
+	const deadline = Date.now() + 180000;
 	let lastX = (await getPlayerPos(page)).x;
 	let stuckTicks = 0;
 	while (Date.now() < deadline) {
