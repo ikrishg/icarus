@@ -3174,6 +3174,12 @@ async function runL15RealKeys(baseUrl) {
 	await page.keyboard.down('ArrowRight');
 	await page.keyboard.down('ArrowUp');
 	await page.keyboard.down('KeyD');
+	const goal = await page.evaluate(() => {
+		const g =
+			window.__icarusGame?.scene.getScene('Play')?.levelManager?.current
+				?.goal;
+		return { x: g?.x ?? 1740, y: g?.y ?? 400 };
+	});
 	const deadline = Date.now() + 180000;
 	let lastX = (await getPlayerPos(page)).x;
 	let stuckTicks = 0;
@@ -3182,7 +3188,9 @@ async function runL15RealKeys(baseUrl) {
 			window.__icarusGame?.scene.isActive('Win'),
 		);
 		if (won) break;
-		const x = (await getPlayerPos(page)).x;
+		const pos = await getPlayerPos(page);
+		const x = pos.x;
+		const y = pos.y;
 		if (x > lastX + 2) {
 			stuckTicks = 0;
 			lastX = x;
@@ -3194,11 +3202,20 @@ async function runL15RealKeys(baseUrl) {
 			await page.keyboard.press('KeyE');
 			stuckTicks = 0;
 		}
-		const y = (await getPlayerPos(page)).y;
-		if (x > 1350 && x < 1780 && y > 420) {
+		if (x >= goal.x - 120 && y > goal.y + 24) {
 			await page.keyboard.up('ArrowRight');
 			await page.keyboard.down('ArrowUp');
-			for (let burst = 0; burst < 12; burst++) {
+			for (let burst = 0; burst < 14; burst++) {
+				await page.keyboard.press('Space');
+				await page.waitForTimeout(90);
+				await page.keyboard.press('KeyQ');
+				await page.waitForTimeout(90);
+			}
+			await page.keyboard.down('ArrowRight');
+		} else if (x > 1350 && x < goal.x - 80 && y > 420) {
+			await page.keyboard.up('ArrowRight');
+			await page.keyboard.down('ArrowUp');
+			for (let burst = 0; burst < 8; burst++) {
 				await page.keyboard.press('Space');
 				await page.waitForTimeout(100);
 				await page.keyboard.press('KeyQ');
@@ -4028,6 +4045,12 @@ async function main() {
 		server.close();
 		console.log(JSON.stringify({ touchSpawn }, null, 2));
 		process.exit(touchSpawn.touchSpawnOk ? 0 : 1);
+	}
+	if (process.env.QA_L15_ONLY === '1') {
+		const l15RealKeys = await runL15RealKeys(baseUrl);
+		server.close();
+		console.log(JSON.stringify({ l15RealKeys }, null, 2));
+		process.exit(l15RealKeys.l15RealKeysOk ? 0 : 1);
 	}
 	const pause = await runPauseEscToggle(baseUrl);
 	const desktop = await runDesktop(baseUrl);
