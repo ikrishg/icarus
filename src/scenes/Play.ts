@@ -486,7 +486,7 @@ export class Play extends Scene {
 		this.levelManager.goto(levelIndex);
 		this.refreshTouchSpawnLayout();
 		const spawnPos = this.resolveTouchSpawnPlacement();
-		if (isPortraitBlockerActive() && this.touchControls?.visible) {
+		if (this.touchControls?.visible) {
 			this.pendingTouchLandscapeSpawn = true;
 		}
 		this.player.revive(spawnPos.x, spawnPos.y);
@@ -989,34 +989,23 @@ export class Play extends Scene {
 	};
 
 	handleDisplayResize(): void {
+		const portraitBlockerWasActive = this.portraitBlockerPauseActive;
 		this.touchControls?.relayout();
 		this.relayoutTouchChromeHud();
 		this.relayoutLevelInstructionIfVisible();
 		this.syncPortraitBlockerPause();
+		if (
+			this.touchControls?.visible &&
+			portraitBlockerWasActive &&
+			!isPortraitBlockerActive()
+		) {
+			this.pendingTouchLandscapeSpawn = true;
+		}
 		this.syncTouchLandscapeSpawnIfNeeded();
 		if (!this.isResetting && !this.player?.isDead) {
-			this.alignPlayerToTouchSpawnAfterLayoutChange();
 			this.repositionTouchSpawnIfOverlappingButtons();
 			this.schedulePushClearOfTouchButtons();
 		}
-	}
-
-	/** After orientation/size changes, snap spawn if layout no longer matches the player. */
-	private alignPlayerToTouchSpawnAfterLayoutChange(): void {
-		if (!this.touchControls?.visible || !this.player?.sprite?.body) {
-			return;
-		}
-		this.refreshTouchSpawnLayout();
-		const want =
-			this.pickTouchSpawnAtCurrentLayout() ??
-			this.touchSpawnFallbackPosition();
-		if (Math.abs(this.player.sprite.x - want.x) <= 8) {
-			return;
-		}
-		const placed = this.resolveTouchSpawnPlacement();
-		this.player.setPosition(placed.x, placed.y);
-		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
-		body.updateFromGameObject();
 	}
 
 	private repositionTouchSpawnIfOverlappingButtons(): void {
