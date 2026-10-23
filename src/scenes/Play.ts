@@ -959,7 +959,10 @@ export class Play extends Scene {
 
 	private touchLivesFontSize(): string {
 		if (!isTouchDevice(this)) return '40px';
-		return this.scale.displaySize.width <= 568 ? '28px' : '40px';
+		if (this.scale.displaySize.width <= 568) {
+			return touchFontSizeStyle(this, 24, 7);
+		}
+		return '40px';
 	}
 
 	createLivesHud() {
