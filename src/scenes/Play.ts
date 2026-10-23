@@ -486,7 +486,7 @@ export class Play extends Scene {
 		this.levelManager.goto(levelIndex);
 		this.refreshTouchSpawnLayout();
 		const spawnPos = this.resolveTouchSpawnPlacement();
-		if (this.touchControls?.visible) {
+		if (isPortraitBlockerActive() && this.touchControls?.visible) {
 			this.pendingTouchLandscapeSpawn = true;
 		}
 		this.player.revive(spawnPos.x, spawnPos.y);
@@ -922,10 +922,10 @@ export class Play extends Scene {
 	/** Read-only: expected spawn at the current touch layout (no shrink / relayout). */
 	touchSpawnPosition(): { x: number; y: number } {
 		const start = this.levelManager.current.start;
-		if (!this.touchControls?.visible) {
+		if (!this.player?.sprite?.body || !this.touchControls) {
 			return { x: start.x, y: start.y };
 		}
-		if (!this.player?.sprite?.body) {
+		if (!isTouchDevice(this)) {
 			return { x: start.x, y: start.y };
 		}
 		this.refreshTouchSpawnLayout();
@@ -1176,6 +1176,12 @@ export class Play extends Scene {
 			return;
 		}
 		if (this.player.isDead || isPortraitBlockerActive()) {
+			return;
+		}
+		const start = this.levelManager.current.start;
+		const px = this.player.sprite.x;
+		if (px > start.x + 500 && px > 800) {
+			this.pendingTouchLandscapeSpawn = false;
 			return;
 		}
 		this.pendingTouchLandscapeSpawn = false;
