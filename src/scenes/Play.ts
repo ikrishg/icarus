@@ -224,6 +224,7 @@ export class Play extends Scene {
 						this.player.isDead = false;
 						this.player.controlsEnabled = true;
 						this.levelManager.goto(levelIndex);
+						this.refreshTouchSpawnLayout();
 						world.resume();
 						const spawn = this.resolveTouchSpawnPlacement();
 						this.player.revive(spawn.x, spawn.y);

@@ -377,12 +377,14 @@ async function runDesktop(baseUrl) {
 	const levelAfterCheat = await getLevelTitle(page);
 	const cheatSkipped = indexAfterCheat === startIndex;
 
-	const colliders = [colliderAtL1];
+	const colliderAfterCheat = await getColliderCount(page);
+	const colliders = [colliderAfterCheat];
 	for (let i = 0; i < 5; i++) {
 		await page.evaluate(() => {
 			const play = window.__icarusGame?.scene.getScene('Play');
 			play?.resetPlayer?.();
 		});
+		await page.waitForTimeout(80);
 		colliders.push(await getColliderCount(page));
 	}
 
@@ -397,7 +399,9 @@ async function runDesktop(baseUrl) {
 		cheatSkipped,
 		portalAdvanceDesktop,
 		portalLevelsPassed: portalAdvanceDesktop.every(Boolean),
+		colliderAfterCheat,
 		colliders,
+		collidersStable: colliders.every((c) => c === colliderAfterCheat && c > 0),
 		stuckOnGround: maxPlayerX < 250,
 	};
 }
@@ -4197,9 +4201,7 @@ async function main() {
 	const mobile = await runMobile(baseUrl);
 	server.close();
 
-	const collidersStable = desktop.colliders.every(
-		(c) => c === desktop.colliderAtL1 && c > 0,
-	);
+	const collidersStable = desktop.collidersStable;
 	const pass =
 		!desktop.cheatSkipped &&
 		debug.debugCheatSkipped &&
