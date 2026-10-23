@@ -301,11 +301,17 @@ export class TouchControls {
 
 		for (const { id, pointer, role } of heldPointers) {
 			if (!role || !pointer.isDown) continue;
-			if (this.pointerHitsRole(pointer, role)) {
-				this.activeHolds.set(id, role);
-				const slot = this.pointerReleaseHandlers.find((h) => h.role === role);
-				if (slot) {
-					slot.pointerId = id;
+			if (!this.pointerHitsRole(pointer, role)) continue;
+			const set =
+				this.rolePointerCounts.get(role) ?? new Set<number>();
+			this.rolePointerCounts.set(role, set);
+			const wasEmpty = set.size === 0;
+			set.add(id);
+			this.activeHolds.set(id, role);
+			const slot = this.pointerReleaseHandlers.find((h) => h.role === role);
+			if (slot) {
+				slot.pointerId = id;
+				if (wasEmpty) {
 					slot.press();
 				}
 			}

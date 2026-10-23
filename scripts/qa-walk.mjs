@@ -2417,7 +2417,9 @@ async function resetPlayLevel(page, levelIdx = 0) {
 	await page.evaluate((levelIdx) => {
 		window.__icarusPrepareLevel?.(levelIdx);
 		const play = window.__icarusGame?.scene.getScene('Play');
-		play?.abilityManager?.reset?.();
+		if (!play?.levelManager?.current?.isGainLevel) {
+			play?.abilityManager?.reset?.();
+		}
 		const start = play?.levelManager?.current?.start;
 		if (start && play?.player) {
 			play.player.revive(start.x, start.y);
@@ -3518,6 +3520,9 @@ async function runPortraitUnfreezeCases(baseUrl) {
 	await page.evaluate(() => {
 		window.dispatchEvent(new Event('resize'));
 		window.visualViewport?.dispatchEvent(new Event('resize'));
+		const play = window.__icarusGame?.scene.getScene('Play');
+		play?.handleDisplayResize?.();
+		play?.requestTouchSpawnLandscapeSync?.();
 	});
 	await page.waitForTimeout(1200);
 	await page.waitForFunction(
@@ -3951,7 +3956,9 @@ async function runTouchUrlBarShrinkAsserts(baseUrl) {
 		await page.setViewportSize(caseDef.shrink);
 		await page.waitForTimeout(650);
 		await page.evaluate(() => {
-			window.__icarusGame?.scene.getScene('Play')?.handleDisplayResize?.();
+			const play = window.__icarusGame?.scene.getScene('Play');
+			play?.touchControls?.releaseAllHolds?.();
+			play?.handleDisplayResize?.();
 		});
 		await page.waitForTimeout(350);
 		const hud = await collectTouchHudOverlap(page);
@@ -4212,9 +4219,9 @@ async function main() {
 	const touchDeathPhysicsPaused = await runTouchDeathPhysicsPaused(baseUrl);
 	const touchDeathHudResize = await runTouchDeathHudResize(baseUrl);
 	const touchDualFingerSameButton = await runTouchDualFingerSameButton(baseUrl);
-	const prodBundleDebugGlobals = await runProdBundleDebugGlobals(baseUrl);
 	const l15RealKeys = await runL15RealKeys(baseUrl);
 	const portraitUnfreeze = await runPortraitUnfreezeCases(baseUrl);
+	const prodBundleDebugGlobals = await runProdBundleDebugGlobals(baseUrl);
 	const touchPauseToggle = await runTouchPauseToggle(baseUrl);
 	const lossScreen = await runLossScreenLayout(baseUrl);
 	const mobile = await runMobile(baseUrl);

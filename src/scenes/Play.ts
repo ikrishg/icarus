@@ -426,10 +426,7 @@ export class Play extends Scene {
 		const finishDeath = () => {
 			this.relayoutTouchChromeHud();
 			this.setGameplayHudVisible(true);
-			this.isResetting = false;
-			if (this.levelManager.deferLevelClockReset) {
-				this.levelManager.applyDeferredLevelStartClock();
-			}
+			this.endLevelTransitionReset();
 			if (isPortraitBlockerActive()) {
 				this.portraitBlockerPauseActive = true;
 				this.isPaused = true;
@@ -522,6 +519,14 @@ export class Play extends Scene {
 		this.colliders = [];
 	}
 
+	/** Clears portal/ability reset gate and resumes deferred fireball schedule. */
+	private endLevelTransitionReset(): void {
+		this.isResetting = false;
+		if (this.levelManager.deferLevelClockReset) {
+			this.levelManager.applyDeferredLevelStartClock();
+		}
+	}
+
 	completeLevel() {
 		if (this.isResetting) return;
 		this.clearLevelInstruction();
@@ -567,14 +572,14 @@ export class Play extends Scene {
 				this.resetPlayer();
 				this.playBattleMusic();
 				this.showLevelInstruction();
-				this.isResetting = false;
+				this.endLevelTransitionReset();
 				this.syncPortraitBlockerPause();
 			}
 		});
 	}
 
 	showWinScreen() {
-		this.isResetting = false;
+		this.endLevelTransitionReset();
 		this.levelManager.goto(0);
 		this.resetPlayer();
 		this.scene.switch('Win', { giftsLost: this.giftsLost });
@@ -1024,11 +1029,11 @@ export class Play extends Scene {
 		const sprB = sprite.getBounds();
 		const spriteHalfW = (sprB.right - sprB.left) / 2;
 		const spriteHalfH = (sprB.bottom - sprB.top) / 2;
-		const startY = this.levelManager.current.start.y;
+		const playerY = sprite.y;
 		if (
 			!spriteOverlapsButtons(
 				sprite.x,
-				startY,
+				playerY,
 				spriteHalfW,
 				spriteHalfH,
 				buttons,
@@ -1061,13 +1066,13 @@ export class Play extends Scene {
 		const sprB = sprite.getBounds();
 		const spriteHalfW = (sprB.right - sprB.left) / 2;
 		const spriteHalfH = (sprB.bottom - sprB.top) / 2;
-		const startY = this.levelManager.current.start.y;
+		const playerY = sprite.y;
 		const startX = sprite.x;
 
 		if (
 			!spriteOverlapsButtons(
 				startX,
-				startY,
+				playerY,
 				spriteHalfW,
 				spriteHalfH,
 				buttons,
@@ -1462,7 +1467,7 @@ export class Play extends Scene {
 				this.resetPlayer();
 				this.playBattleMusic();
 				this.showLevelInstruction();
-				this.isResetting = false;
+				this.endLevelTransitionReset();
 				this.syncPortraitBlockerPause();
 			}
 			return;
@@ -1685,7 +1690,7 @@ export class Play extends Scene {
 				this.resetPlayer();
 				this.playBattleMusic();
 				this.showLevelInstruction();
-				this.isResetting = false;
+				this.endLevelTransitionReset();
 				this.syncPortraitBlockerPause();
 				this.handleDisplayResize();
 			}
@@ -1696,7 +1701,6 @@ export class Play extends Scene {
 			if (event.code === 'ArrowLeft' || event.code === 'KeyA') {
 				selectedIndex = Math.max(0, selectedIndex - 1);
 				updateSelection();
-			} else if (event.code === 'ArrowRight' || event.code === 'KeyD') {
 				selectedIndex = Math.min(buttons.length - 1, selectedIndex + 1);
 				updateSelection();
 			} else if (event.code === 'ArrowUp' || event.code === 'KeyW') {
@@ -1782,7 +1786,7 @@ export class Play extends Scene {
 				this.resetPlayer();
 				this.playBattleMusic();
 				this.showLevelInstruction();
-				this.isResetting = false;
+				this.endLevelTransitionReset();
 				this.syncPortraitBlockerPause();
 			}
 			return;
@@ -1976,7 +1980,7 @@ export class Play extends Scene {
 				this.resetPlayer();
 				this.playBattleMusic();
 				this.showLevelInstruction();
-				this.isResetting = false;
+				this.endLevelTransitionReset();
 				this.syncPortraitBlockerPause();
 			}
 		};
