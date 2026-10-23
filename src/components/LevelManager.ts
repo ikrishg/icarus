@@ -322,6 +322,10 @@ export class LevelManager {
 
 	/** Re-anchor fireball timers to now (QA prepare / death resume). */
 	syncFireballSpawnClock(): void {
+		this.fireballs.forEach((fb) => {
+			fb.destroy();
+		});
+		this.fireballs = [];
 		this.fireballTimers.forEach((timer) => {
 			timer.remove();
 		});
