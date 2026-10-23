@@ -928,7 +928,12 @@ export class Play extends Scene {
 		if (!isTouchDevice(this)) {
 			return { x: start.x, y: start.y };
 		}
-		this.refreshTouchSpawnLayout();
+		if (!this.touchControls.visible) {
+			return (
+				this.pickTouchSpawnAtCurrentLayout() ??
+				this.touchSpawnFallbackPosition()
+			);
+		}
 		return (
 			this.pickTouchSpawnAtCurrentLayout() ??
 			this.touchSpawnFallbackPosition()
