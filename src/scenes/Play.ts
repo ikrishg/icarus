@@ -1212,10 +1212,10 @@ export class Play extends Scene {
 	/** QA / portrait return: snap player to touch spawn when layout changed. */
 	requestTouchSpawnLandscapeSync(): void {
 		this.pendingTouchLandscapeSpawn = true;
-		this.syncTouchLandscapeSpawnIfNeeded();
+		this.syncTouchLandscapeSpawnIfNeeded(true);
 	}
 
-	private syncTouchLandscapeSpawnIfNeeded(): void {
+	private syncTouchLandscapeSpawnIfNeeded(forceSpawn = false): void {
 		if (!this.pendingTouchLandscapeSpawn || !this.player?.sprite?.body) {
 			return;
 		}
@@ -1227,7 +1227,7 @@ export class Play extends Scene {
 		if (this.touchResizePreservesPlayerProgress()) {
 			return;
 		}
-		if (!this.playerOverlapsTouchGameplayButtons()) {
+		if (!forceSpawn && !this.playerOverlapsTouchGameplayButtons()) {
 			return;
 		}
 		const spawn = this.resolveTouchSpawnPlacement();
