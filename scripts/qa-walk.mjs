@@ -1226,7 +1226,7 @@ function hazardIntervalsForLevel(level, spawnY) {
 				intervals.push({ left, right: left + w });
 			}
 		}
-		if (o.type === 'fireball' && spawnY <= o.y + 120) {
+		if (o.type === 'fireball') {
 			intervals.push({
 				left: o.x - FIREBALL_HAZARD_HALF_W,
 				right: o.x + FIREBALL_HAZARD_HALF_W,
@@ -1680,7 +1680,7 @@ async function runTouchSpawnSafety(baseUrl) {
 								hazards.push({ left, right: left + w });
 							}
 						}
-						if (o.type === 'fireball' && levelDef.start.y <= o.y + 120) {
+						if (o.type === 'fireball') {
 							hazards.push({
 								left: o.x - 27,
 								right: o.x + 27,

@@ -485,9 +485,6 @@ export class Play extends Scene {
 		this.levelManager.goto(levelIndex);
 		this.refreshTouchSpawnLayout();
 		const spawnPos = this.resolveTouchSpawnPlacement();
-		if (isPortraitBlockerActive() && this.touchControls?.visible) {
-			this.pendingTouchLandscapeSpawn = true;
-		}
 		this.player.revive(spawnPos.x, spawnPos.y);
 		this.setupLevelColliders();
 		this.relayoutTouchChromeHud();
@@ -774,7 +771,6 @@ export class Play extends Scene {
 		spriteHalfW: number,
 		spawnY: number,
 	): number {
-		const clusterMin = this.touchControls!.getMinSpawnX(spriteHalfW);
 		let maxX = WIDTH - spriteHalfW;
 		for (const h of hazardIntervalsForLevel(
 			this.levelManager.current,
@@ -1023,8 +1019,34 @@ export class Play extends Scene {
 		}
 	}
 
+	private touchResizePreservesPlayerProgress(): boolean {
+		const start = this.levelManager.current.start;
+		const px = this.player?.sprite?.x ?? start.x;
+		return px > start.x + 500 && px > 800;
+	}
+
+	private playerOverlapsTouchGameplayButtons(): boolean {
+		if (!this.touchControls?.visible || !this.player?.sprite?.body) {
+			return false;
+		}
+		const buttons = this.touchGameplayButtons();
+		if (buttons.length === 0) return false;
+		const sprite = this.player.sprite;
+		const sprB = sprite.getBounds();
+		const spriteHalfW = (sprB.right - sprB.left) / 2;
+		const spriteHalfH = (sprB.bottom - sprB.top) / 2;
+		return spriteOverlapsButtons(
+			sprite.x,
+			sprite.y,
+			spriteHalfW,
+			spriteHalfH,
+			buttons,
+		);
+	}
+
 	private repositionTouchSpawnIfOverlappingButtons(): void {
 		if (!this.touchControls?.visible || !this.player?.sprite?.body) return;
+		if (this.touchResizePreservesPlayerProgress()) return;
 		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
 		const buttons = this.touchGameplayButtons();
 		if (buttons.length === 0) return;
@@ -1061,6 +1083,7 @@ export class Play extends Scene {
 	private pushPlayerClearOfTouchButtons(): void {
 		if (!this.touchControls?.visible || !this.player?.sprite?.body) return;
 		if (this.player.isDead || this.isResetting) return;
+		if (this.touchResizePreservesPlayerProgress()) return;
 		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
 		const buttons = this.touchGameplayButtons();
 		if (buttons.length === 0) return;
@@ -1199,14 +1222,14 @@ export class Play extends Scene {
 		if (this.player.isDead || isPortraitBlockerActive()) {
 			return;
 		}
-		const start = this.levelManager.current.start;
-		const px = this.player.sprite.x;
-		if (px > start.x + 500 && px > 800) {
-			this.pendingTouchLandscapeSpawn = false;
-			return;
-		}
 		this.pendingTouchLandscapeSpawn = false;
 		this.touchControls?.relayout();
+		if (this.touchResizePreservesPlayerProgress()) {
+			return;
+		}
+		if (!this.playerOverlapsTouchGameplayButtons()) {
+			return;
+		}
 		const spawn = this.resolveTouchSpawnPlacement();
 		this.player.setPosition(spawn.x, spawn.y);
 		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;

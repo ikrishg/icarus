@@ -22,14 +22,14 @@ export function spikeSegmentIntervals(obstacle: ObstacleDef): AxisInterval[] {
 
 export function hazardIntervalsForLevel(
 	level: LevelDefinition,
-	spawnY: number,
+	_spawnY: number,
 ): AxisInterval[] {
 	const intervals: AxisInterval[] = [];
 	for (const o of level.obstacles ?? []) {
 		if (o.type === 'spikes') {
 			intervals.push(...spikeSegmentIntervals(o));
 		}
-		if (o.type === 'fireball' && spawnY <= o.y + 120) {
+		if (o.type === 'fireball') {
 			intervals.push({
 				left: o.x - FIREBALL_HALF_W,
 				right: o.x + FIREBALL_HALF_W,
