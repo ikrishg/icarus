@@ -3181,6 +3181,7 @@ async function runTouchResizeButtonClearance(baseUrl) {
 async function runL15RealKeys(baseUrl) {
 	const browser = await chromium.launch();
 	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+	await applyCpuThrottleIfRequested(page);
 	let won = false;
 	let lastDiagnostics = null;
 	for (let attempt = 0; attempt < 5 && !won; attempt++) {
@@ -3213,6 +3214,7 @@ async function runL15RealKeys(baseUrl) {
 			return { x: g?.x ?? 1740, y: g?.y ?? 400 };
 		});
 		const deadline = Date.now() + 180000;
+		const stepMs = process.env.QA_CPU_THROTTLE === '1' ? 150 : 220;
 		let lastX = (await getPlayerPos(page)).x;
 		let stuckTicks = 0;
 		let jumpBurst = 0;
@@ -3328,7 +3330,7 @@ async function runL15RealKeys(baseUrl) {
 				}
 			}
 
-			await page.waitForTimeout(220);
+			await page.waitForTimeout(stepMs);
 		}
 		await page.keyboard.up('ArrowRight');
 		await page.keyboard.up('ArrowUp');

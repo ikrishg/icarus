@@ -229,6 +229,7 @@ export class Play extends Scene {
 						const spawn = this.resolveTouchSpawnPlacement();
 						this.player.revive(spawn.x, spawn.y);
 						this.setupLevelColliders();
+						this.levelManager.syncFireballSpawnClock();
 						if (this.touchControls?.visible) {
 							this.repositionTouchSpawnIfOverlappingButtons();
 						}

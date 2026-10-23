@@ -320,6 +320,15 @@ export class LevelManager {
 		}
 	}
 
+	/** Re-anchor fireball timers to now (QA prepare / death resume). */
+	syncFireballSpawnClock(): void {
+		this.fireballTimers.forEach((timer) => {
+			timer.remove();
+		});
+		this.fireballTimers = [];
+		this.commitFireballSpawnSchedule();
+	}
+
 	/** After death reset, align fireball spawns with levelStartedAt. */
 	applyDeferredLevelStartClock(): void {
 		if (!this.deferLevelClockReset) return;
