@@ -3148,102 +3148,147 @@ async function runL15RealKeys(baseUrl) {
 	const browser = await chromium.launch();
 	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 	let won = false;
+	let lastDiagnostics = null;
 	for (let attempt = 0; attempt < 5 && !won; attempt++) {
-	await bootToPlay(page, baseUrl);
-	await page.evaluate(() => {
-		const play = window.__icarusGame?.scene.getScene('Play');
-		play.lives = 30;
-		play.updateLivesHud?.();
-		play.abilityManager.abilities.jumpLevel = 3;
-		play.abilityManager.abilities.dashLevel = 2;
-		play.abilityManager.abilities.canMoveLeft = true;
-		play.abilityManager.abilities.canShootArrows = true;
-		play.abilityManager.abilities.visionLevel = 2;
-		window.__icarusPrepareLevel?.(14);
-		play.closePause?.();
-		play.clearLevelInstruction?.();
-		play.isPaused = false;
-		play.physics?.resume?.();
-		if (play.time) {
-			play.time.paused = false;
-			play.time.timeScale = 1;
-		}
-	});
-	await page.waitForTimeout(400);
-	await page.locator('canvas').click();
-	await page.keyboard.down('ArrowRight');
-	await page.keyboard.down('ArrowUp');
-	await page.keyboard.down('KeyD');
-	const goal = await page.evaluate(() => {
-		const g =
-			window.__icarusGame?.scene.getScene('Play')?.levelManager?.current
-				?.goal;
-		return { x: g?.x ?? 1740, y: g?.y ?? 400 };
-	});
-	const deadline = Date.now() + 180000;
-	let lastX = (await getPlayerPos(page)).x;
-	let stuckTicks = 0;
-	while (Date.now() < deadline) {
-		won = await page.evaluate(() =>
-			window.__icarusGame?.scene.isActive('Win'),
-		);
-		if (won) break;
-		const pos = await getPlayerPos(page);
-		const x = pos.x;
-		const y = pos.y;
-		if (x > lastX + 2) {
-			stuckTicks = 0;
-			lastX = x;
-		} else {
-			stuckTicks += 1;
-		}
-		if (stuckTicks >= 6) {
-			await page.keyboard.press('KeyQ');
-			await page.keyboard.press('KeyE');
-			stuckTicks = 0;
-		}
-		if (x >= goal.x - 120 && y > goal.y + 24) {
-			await page.keyboard.up('ArrowRight');
-			await page.keyboard.down('ArrowUp');
-			for (let burst = 0; burst < 14; burst++) {
-				await page.keyboard.press('Space');
-				await page.waitForTimeout(90);
-				await page.keyboard.press('KeyQ');
-				await page.waitForTimeout(90);
+		await bootToPlay(page, baseUrl);
+		await page.evaluate(() => {
+			const play = window.__icarusGame?.scene.getScene('Play');
+			play.lives = 30;
+			play.updateLivesHud?.();
+			play.abilityManager.abilities.jumpLevel = 3;
+			play.abilityManager.abilities.dashLevel = 2;
+			play.abilityManager.abilities.canMoveLeft = true;
+			play.abilityManager.abilities.canShootArrows = true;
+			play.abilityManager.abilities.visionLevel = 2;
+			window.__icarusPrepareLevel?.(14);
+			play.closePause?.();
+			play.clearLevelInstruction?.();
+			play.isPaused = false;
+			play.physics?.resume?.();
+			if (play.time) {
+				play.time.paused = false;
+				play.time.timeScale = 1;
 			}
-			await page.keyboard.down('ArrowRight');
-		} else if (x > 1350 && x < goal.x - 80 && y > 420) {
-			await page.keyboard.up('ArrowRight');
-			await page.keyboard.down('ArrowUp');
-			for (let burst = 0; burst < 8; burst++) {
-				await page.keyboard.press('Space');
-				await page.waitForTimeout(100);
-				await page.keyboard.press('KeyQ');
-				await page.waitForTimeout(100);
-			}
-			await page.keyboard.down('ArrowRight');
-		}
-		const onGround = await page.evaluate(() => {
-			const body =
-				window.__icarusGame?.scene.getScene('Play')?.player?.sprite?.body;
-			return Boolean(body?.touching?.down);
 		});
-		if (onGround) {
-			await page.keyboard.press('Space');
-			await page.waitForTimeout(120);
-			await page.keyboard.press('Space');
-		} else {
-			await page.keyboard.press('Space');
+		await page.waitForTimeout(400);
+		await page.locator('canvas').click();
+		const goal = await page.evaluate(() => {
+			const g =
+				window.__icarusGame?.scene.getScene('Play')?.levelManager?.current
+					?.goal;
+			return { x: g?.x ?? 1740, y: g?.y ?? 400 };
+		});
+		const deadline = Date.now() + 180000;
+		let lastX = (await getPlayerPos(page)).x;
+		let stuckTicks = 0;
+		let jumpBurst = 0;
+		while (Date.now() < deadline) {
+			won = await page.evaluate(() =>
+				window.__icarusGame?.scene.isActive('Win'),
+			);
+			if (won) break;
+			const pos = await getPlayerPos(page);
+			const x = pos.x;
+			const y = pos.y;
+			const msLeft = deadline - Date.now();
+			const onGround = await page.evaluate(() => {
+				const body =
+					window.__icarusGame?.scene.getScene('Play')?.player?.sprite
+						?.body;
+				return Boolean(body?.touching?.down);
+			});
+			if (x > lastX + 2) {
+				stuckTicks = 0;
+				lastX = x;
+			} else {
+				stuckTicks += 1;
+			}
+			lastDiagnostics = {
+				attempt: attempt + 1,
+				x,
+				y,
+				goal,
+				msRemaining: msLeft,
+				onGround,
+				stuckTicks,
+			};
+
+			await page.keyboard.down('ArrowUp');
+			const portalBand = y < goal.y + 140 && x > goal.x - 200;
+			const topLedge = y < 620 && x > 1380;
+			const midClimb = y < 780 && x > 880;
+			const spikeGap = y > 880 && x > 720 && x < 1020;
+
+			if (portalBand) {
+				await page.keyboard.up('ArrowRight');
+				if (x < goal.x - 36) {
+					await page.keyboard.down('ArrowRight');
+				}
+				await page.keyboard.press('Space');
+				await page.waitForTimeout(60);
+				await page.keyboard.press('Space');
+				if (stuckTicks >= 4) {
+					await page.keyboard.press('KeyQ');
+					stuckTicks = 0;
+				}
+			} else if (topLedge) {
+				if (x < goal.x - 24) {
+					await page.keyboard.down('ArrowRight');
+				} else if (x > goal.x + 40) {
+					await page.keyboard.up('ArrowRight');
+					await page.keyboard.press('ArrowLeft');
+					await page.waitForTimeout(40);
+					await page.keyboard.up('ArrowLeft');
+				} else {
+					await page.keyboard.up('ArrowRight');
+				}
+				await page.keyboard.press('Space');
+				await page.waitForTimeout(50);
+				await page.keyboard.press('Space');
+				if (y > goal.y + 60) {
+					await page.keyboard.press('KeyQ');
+				}
+			} else if (midClimb || spikeGap) {
+				await page.keyboard.down('ArrowRight');
+				if (onGround || jumpBurst % 2 === 0) {
+					await page.keyboard.press('Space');
+					await page.waitForTimeout(70);
+					await page.keyboard.press('Space');
+				} else {
+					await page.keyboard.press('Space');
+				}
+				if (stuckTicks >= 5) {
+					await page.keyboard.press('KeyQ');
+					stuckTicks = 0;
+				}
+				jumpBurst += 1;
+			} else {
+				await page.keyboard.down('ArrowRight');
+				if (onGround) {
+					await page.keyboard.press('Space');
+					await page.waitForTimeout(90);
+					await page.keyboard.press('Space');
+				} else {
+					await page.keyboard.press('Space');
+				}
+				if (stuckTicks >= 8) {
+					await page.keyboard.press('KeyQ');
+					stuckTicks = 0;
+				}
+			}
+
+			await page.waitForTimeout(220);
 		}
-		await page.waitForTimeout(280);
-	}
-	await page.keyboard.up('ArrowRight');
-	await page.keyboard.up('ArrowUp');
-	await page.keyboard.up('KeyD');
-	if (won) break;
+		await page.keyboard.up('ArrowRight');
+		await page.keyboard.up('ArrowUp');
+		await page.keyboard.up('ArrowLeft');
+		if (won) break;
 	}
 	await browser.close();
-	return { l15RealKeysOk: won };
+	return {
+		l15RealKeysOk: won,
+		...(won ? {} : { lastDiagnostics }),
+	};
 }
 
 async function runTouchRelayoutClearsHold(baseUrl) {
