@@ -342,9 +342,21 @@ async function runDesktop(baseUrl) {
 	await page.keyboard.up('ArrowRight');
 	const playerXAfterWalk = (await getPlayerPos(page)).x;
 
-	await page.keyboard.press('Semicolon');
-	await page.waitForTimeout(800);
-	const levelAfterCheat = await getLevelTitle(page);
+	await page.locator('canvas').click();
+	let levelAfterCheat = level1Title;
+	for (let cheatTry = 0; cheatTry < 12; cheatTry++) {
+		await page.keyboard.press('Semicolon');
+		for (let wait = 0; wait < 15; wait++) {
+			await page.waitForTimeout(100);
+			levelAfterCheat = await getLevelTitle(page);
+			if (levelAfterCheat !== level1Title) break;
+			const resetting = await page.evaluate(
+				() => window.__icarusGame?.scene.getScene('Play')?.isResetting,
+			);
+			if (resetting) continue;
+		}
+		if (levelAfterCheat !== level1Title) break;
+	}
 	const cheatSkipped = levelAfterCheat !== level1Title;
 
 	const colliders = [colliderAtL1];
@@ -3214,12 +3226,25 @@ async function runL15RealKeys(baseUrl) {
 			};
 
 			await page.keyboard.down('ArrowUp');
-			const portalBand = y < goal.y + 140 && x > goal.x - 200;
-			const topLedge = y < 620 && x > 1380;
-			const midClimb = y < 780 && x > 880;
+			const portalBand = y < goal.y + 150 && x > goal.x - 220;
+			const topLedge = y < 700 && x > 1320;
+			const midClimb = y < 820 && x > 760 && x <= 1340;
 			const spikeGap = y > 880 && x > 720 && x < 1020;
+			const highXGround = y > 680 && x > 1260;
+			const overshootRight = x > goal.x + 24 && y > goal.y + 120;
+			const wallRunoff = x > 1840 && y > goal.y + 80;
 
-			if (portalBand) {
+			if (overshootRight || wallRunoff) {
+				await page.keyboard.up('ArrowRight');
+				await page.keyboard.down('ArrowLeft');
+				await page.keyboard.press('Space');
+				await page.waitForTimeout(50);
+				await page.keyboard.press('Space');
+				await page.keyboard.press('KeyQ');
+				await page.waitForTimeout(40);
+				await page.keyboard.up('ArrowLeft');
+				stuckTicks = 0;
+			} else if (portalBand) {
 				await page.keyboard.up('ArrowRight');
 				if (x < goal.x - 36) {
 					await page.keyboard.down('ArrowRight');
@@ -3231,7 +3256,7 @@ async function runL15RealKeys(baseUrl) {
 					await page.keyboard.press('KeyQ');
 					stuckTicks = 0;
 				}
-			} else if (topLedge) {
+			} else if (topLedge || highXGround) {
 				if (x < goal.x - 24) {
 					await page.keyboard.down('ArrowRight');
 				} else if (x > goal.x + 40) {
@@ -3245,8 +3270,12 @@ async function runL15RealKeys(baseUrl) {
 				await page.keyboard.press('Space');
 				await page.waitForTimeout(50);
 				await page.keyboard.press('Space');
-				if (y > goal.y + 60) {
+				if (y > goal.y + 40 || highXGround) {
 					await page.keyboard.press('KeyQ');
+				}
+				if (stuckTicks >= 3) {
+					await page.keyboard.press('KeyQ');
+					stuckTicks = 0;
 				}
 			} else if (midClimb || spikeGap) {
 				await page.keyboard.down('ArrowRight');
