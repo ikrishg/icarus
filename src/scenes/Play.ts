@@ -467,8 +467,13 @@ export class Play extends Scene {
 				if (this.player) {
 					this.player.controlsEnabled = true;
 				}
-				if (this.touchControls?.visible) {
+				if (
+					this.touchControls?.visible &&
+					isPortraitBlockerActive()
+				) {
 					this.recentDeathNeedsLandscapeSpawnSync = true;
+				} else {
+					this.recentDeathNeedsLandscapeSpawnSync = false;
 				}
 				finishDeath();
 			},
@@ -895,41 +900,51 @@ export class Play extends Scene {
 		return this.finalizeTouchSpawnPlacement(this.touchSpawnFallbackPosition());
 	}
 
-	private finalizeTouchSpawnPlacement(pos: { x: number; y: number }): {
+	private finalizeTouchSpawnCoords(pos: { x: number; y: number }): {
 		x: number;
 		y: number;
 	} {
 		const start = this.levelManager.current.start;
-		const sprB = this.player.sprite.getBounds();
+		const sprB = this.player!.sprite.getBounds();
 		const spriteHalfW = (sprB.right - sprB.left) / 2;
 		const clusterMin = this.touchControls!.getMinSpawnX(spriteHalfW);
 		const snapped = this.snapTouchSpawnForQaHazardMargin(pos, clusterMin);
-		this.player.sprite.setPosition(snapped.x, snapped.y);
-		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
-		body.updateFromGameObject();
 		let out = snapped;
 		for (let pass = 0; pass < 8; pass++) {
+			out.x = Math.max(out.x, clusterMin);
 			if (this.touchSpawnMeetsQaHazardMargin(out.x, start.y)) {
-				out.x = Math.max(out.x, clusterMin);
-				return out;
+				return { x: out.x, y: start.y };
 			}
 			const nextX = out.x - 2;
 			if (nextX < clusterMin) {
 				break;
 			}
 			out = { x: nextX, y: start.y };
-			this.player.sprite.setPosition(out.x, out.y);
-			body.updateFromGameObject();
 		}
-		if (!this.touchSpawnMeetsQaHazardMargin(out.x, start.y)) {
-			return { x: Math.max(start.x, clusterMin), y: start.y };
+		const clamped = Math.max(out.x, clusterMin);
+		if (this.touchSpawnMeetsQaHazardMargin(clamped, start.y)) {
+			return { x: clamped, y: start.y };
 		}
-		out.x = Math.max(out.x, clusterMin);
+		const fallback = Math.max(start.x, clusterMin);
+		if (this.touchSpawnMeetsQaHazardMargin(fallback, start.y)) {
+			return { x: fallback, y: start.y };
+		}
+		return { x: start.x, y: start.y };
+	}
+
+	private finalizeTouchSpawnPlacement(pos: { x: number; y: number }): {
+		x: number;
+		y: number;
+	} {
+		const out = this.finalizeTouchSpawnCoords(pos);
+		this.player.sprite.setPosition(out.x, out.y);
+		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
+		body.updateFromGameObject();
 		return out;
 	}
 
-	/** Expected spawn at current touch layout (matches resolveTouchSpawnPlacement). */
-	touchSpawnPosition(): { x: number; y: number } {
+	/** Read-only expected spawn at current touch layout (no relayout / shrink). */
+	touchSpawnExpectedAtCurrentLayout(): { x: number; y: number } {
 		const start = this.levelManager.current.start;
 		if (!this.player?.sprite?.body || !this.touchControls?.visible) {
 			return { x: start.x, y: start.y };
@@ -937,14 +952,15 @@ export class Play extends Scene {
 		if (!isTouchDevice(this)) {
 			return { x: start.x, y: start.y };
 		}
-		const sprite = this.player.sprite;
-		const body = sprite.body as Phaser.Physics.Arcade.Body;
-		const prevX = sprite.x;
-		const prevY = sprite.y;
-		const pos = this.resolveTouchSpawnPlacement();
-		sprite.setPosition(prevX, prevY);
-		body.updateFromGameObject();
-		return pos;
+		const pos =
+			this.pickTouchSpawnAtCurrentLayout() ??
+			this.touchSpawnFallbackPosition();
+		return this.finalizeTouchSpawnCoords(pos);
+	}
+
+	/** Expected spawn at current touch layout (matches resolveTouchSpawnPlacement). */
+	touchSpawnPosition(): { x: number; y: number } {
+		return this.touchSpawnExpectedAtCurrentLayout();
 	}
 
 	resetPlayer() {
@@ -1016,13 +1032,17 @@ export class Play extends Scene {
 			this.pendingTouchLandscapeSpawn = true;
 		}
 		this.syncPortraitBlockerPause();
-		if (
-			leavingPortrait &&
-			this.recentDeathNeedsLandscapeSpawnSync &&
-			!this.touchResizePreservesPlayerProgress()
-		) {
-			this.recentDeathNeedsLandscapeSpawnSync = false;
-			this.requestTouchSpawnLandscapeSync();
+		if (leavingPortrait) {
+			if (
+				this.recentDeathNeedsLandscapeSpawnSync &&
+				!this.touchResizePreservesPlayerProgress()
+			) {
+				this.recentDeathNeedsLandscapeSpawnSync = false;
+				this.requestTouchSpawnLandscapeSync();
+			} else {
+				this.recentDeathNeedsLandscapeSpawnSync = false;
+				this.syncTouchLandscapeSpawnIfNeeded();
+			}
 		} else {
 			this.syncTouchLandscapeSpawnIfNeeded();
 		}
@@ -1130,7 +1150,7 @@ export class Play extends Scene {
 			return;
 		}
 		const panelY = isTouchDevice(this)
-			? touchInstructionPanelCenterY(this)
+			? touchInstructionPanelCenterY(this, this.livesText)
 			: PLAY_HUD_CLEARANCE_Y + 110;
 		const panelW = this.cameras.main.width - 120;
 		this.instructionPanel.setPosition(
@@ -1238,11 +1258,13 @@ export class Play extends Scene {
 		this.pendingTouchLandscapeSpawn = false;
 		this.touchControls?.relayout();
 		if (this.touchResizePreservesPlayerProgress()) {
+			this.recentDeathNeedsLandscapeSpawnSync = false;
 			return;
 		}
 		if (!forceSpawn && !this.playerOverlapsTouchGameplayButtons()) {
 			return;
 		}
+		this.recentDeathNeedsLandscapeSpawnSync = false;
 		const spawn = this.resolveTouchSpawnPlacement();
 		this.player.setPosition(spawn.x, spawn.y);
 		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
@@ -1386,7 +1408,7 @@ export class Play extends Scene {
 		);
 
 		const panelY = isTouchDevice(this)
-			? touchInstructionPanelCenterY(this)
+			? touchInstructionPanelCenterY(this, this.livesText)
 			: PLAY_HUD_CLEARANCE_Y + 110;
 		this.instructionPanel = this.add
 			.rectangle(
