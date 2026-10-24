@@ -146,8 +146,6 @@ export class Play extends Scene {
 	private resizePushTimer?: Phaser.Time.TimerEvent;
 	/** QA prepareLevel: defer fireball timers until touch spawn layout settles. */
 	suppressFireballClockCommit = false;
-	private lastResolvedTouchSpawn?: { x: number; y: number };
-
 	constructor() {
 		super('Play');
 	}
@@ -240,7 +238,6 @@ export class Play extends Scene {
 					try {
 						this.clearLevelInstruction();
 						this.clearColliders();
-						this.lastResolvedTouchSpawn = undefined;
 						this.isResetting = false;
 						this.pendingTouchLandscapeSpawn = false;
 						this.pendingTouchDeathRespawn = false;
@@ -948,12 +945,9 @@ export class Play extends Scene {
 		return { x: start.x, y: start.y };
 	}
 
-	resolveTouchSpawnPlacement(refreshLayout = true): { x: number; y: number } {
+	private computeTouchSpawnCoords(refreshLayout: boolean): { x: number; y: number } {
 		const start = this.levelManager.current.start;
-		if (!this.touchControls?.visible) {
-			return { x: start.x, y: start.y };
-		}
-		if (!this.player?.sprite?.body) {
+		if (!this.touchControls?.visible || !this.player?.sprite?.body) {
 			return { x: start.x, y: start.y };
 		}
 		if (refreshLayout) {
@@ -962,18 +956,28 @@ export class Play extends Scene {
 		for (let attempt = 0; attempt < 36; attempt++) {
 			const pos = this.pickTouchSpawnAtCurrentLayout();
 			if (pos) {
-				return this.finalizeTouchSpawnPlacement(pos);
+				return this.finalizeTouchSpawnCoords(pos);
 			}
 			if (!this.touchControls.shrinkLayoutStep()) {
 				break;
 			}
 			this.touchControls.relayout();
 		}
-		const pos = this.pickTouchSpawnAtCurrentLayout();
-		if (pos) {
-			return this.finalizeTouchSpawnPlacement(pos);
+		const pos =
+			this.pickTouchSpawnAtCurrentLayout() ??
+			this.touchSpawnFallbackPosition();
+		return this.finalizeTouchSpawnCoords(pos);
+	}
+
+	resolveTouchSpawnPlacement(refreshLayout = true): { x: number; y: number } {
+		const out = this.computeTouchSpawnCoords(refreshLayout);
+		if (!this.touchControls?.visible || !this.player?.sprite?.body) {
+			return out;
 		}
-		return this.finalizeTouchSpawnPlacement(this.touchSpawnFallbackPosition());
+		this.player.sprite.setPosition(out.x, out.y);
+		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
+		body.updateFromGameObject();
+		return out;
 	}
 
 	private finalizeTouchSpawnCoords(pos: { x: number; y: number }): {
@@ -1016,11 +1020,10 @@ export class Play extends Scene {
 		this.player.sprite.setPosition(out.x, out.y);
 		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
 		body.updateFromGameObject();
-		this.lastResolvedTouchSpawn = out;
 		return out;
 	}
 
-	/** Read-only expected spawn at current touch layout (matches resolve, no refresh). */
+	/** Read-only expected spawn at current touch layout (matches resolve). */
 	touchSpawnExpectedAtCurrentLayout(): { x: number; y: number } {
 		const start = this.levelManager.current.start;
 		if (!this.player?.sprite?.body || !this.touchControls?.visible) {
@@ -1029,27 +1032,11 @@ export class Play extends Scene {
 		if (!isTouchDevice(this)) {
 			return { x: start.x, y: start.y };
 		}
-		for (let attempt = 0; attempt < 36; attempt++) {
-			const pos = this.pickTouchSpawnAtCurrentLayout();
-			if (pos) {
-				return this.finalizeTouchSpawnCoords(pos);
-			}
-			if (!this.touchControls.shrinkLayoutStep()) {
-				break;
-			}
-			this.touchControls.relayout();
-		}
-		const pos =
-			this.pickTouchSpawnAtCurrentLayout() ??
-			this.touchSpawnFallbackPosition();
-		return this.finalizeTouchSpawnCoords(pos);
+		return this.computeTouchSpawnCoords(false);
 	}
 
 	/** Expected spawn at current touch layout (matches resolveTouchSpawnPlacement). */
 	touchSpawnPosition(): { x: number; y: number } {
-		if (this.lastResolvedTouchSpawn) {
-			return { ...this.lastResolvedTouchSpawn };
-		}
 		return this.touchSpawnExpectedAtCurrentLayout();
 	}
 
@@ -1110,7 +1097,6 @@ export class Play extends Scene {
 	};
 
 	handleDisplayResize(): void {
-		this.lastResolvedTouchSpawn = undefined;
 		this.scale.refresh();
 		const wasPortraitMedia = this.portraitMediaActive;
 		const wasAspectPortrait = this.lastWindowAspectPortrait;
@@ -1154,10 +1140,20 @@ export class Play extends Scene {
 				!this.playerAwayFromTouchSpawnBand() &&
 				!this.touchResizePreservesPlayerProgress()
 			) {
-				this.resolveTouchSpawnPlacement(false);
+				this.applyTouchSpawnAtCurrentLayoutExpectation();
 			}
 			this.schedulePushClearOfTouchButtons();
 		}
+	}
+
+	private applyTouchSpawnAtCurrentLayoutExpectation(): void {
+		if (!this.touchControls?.visible || !this.player?.sprite?.body) {
+			return;
+		}
+		const pos = this.computeTouchSpawnCoords(false);
+		this.player.sprite.setPosition(pos.x, pos.y);
+		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
+		body.updateFromGameObject();
 	}
 
 	private touchResizePreservesPlayerProgress(): boolean {
