@@ -1093,7 +1093,15 @@ export class Play extends Scene {
 			!portraitMedia &&
 			!aspectPortrait;
 		if (leavingPortrait) {
-			this.pendingTouchLandscapeSpawn = true;
+			if (
+				!this.pendingTouchDeathRespawn &&
+				(this.touchResizePreservesPlayerProgress() ||
+					this.playerAwayFromTouchSpawnBand())
+			) {
+				this.pendingTouchLandscapeSpawn = false;
+			} else {
+				this.pendingTouchLandscapeSpawn = true;
+			}
 		}
 		this.syncPortraitBlockerPause();
 		if (
@@ -1108,7 +1116,12 @@ export class Play extends Scene {
 			this.syncTouchLandscapeSpawnIfNeeded();
 		}
 		if (!this.isResetting && !this.player?.isDead) {
-			this.repositionTouchSpawnIfOverlappingButtons();
+			if (
+				!this.playerAwayFromTouchSpawnBand() &&
+				!this.touchResizePreservesPlayerProgress()
+			) {
+				this.repositionTouchSpawnIfOverlappingButtons();
+			}
 			this.schedulePushClearOfTouchButtons();
 		}
 	}
@@ -1117,6 +1130,15 @@ export class Play extends Scene {
 		const start = this.levelManager.current.start;
 		const px = this.player?.sprite?.x ?? start.x;
 		return px > start.x + 500 && px > 800;
+	}
+
+	/** Player left the touch spawn band (mid-level progress); do not snap on rotate. */
+	private playerAwayFromTouchSpawnBand(): boolean {
+		if (!this.player?.sprite || !this.touchControls?.visible) {
+			return false;
+		}
+		const want = this.touchSpawnExpectedAtCurrentLayout();
+		return Math.abs(this.player.sprite.x - want.x) > 12;
 	}
 
 	private playerOverlapsTouchGameplayButtons(): boolean {
@@ -1373,6 +1395,12 @@ export class Play extends Scene {
 		this.pendingTouchLandscapeSpawn = false;
 		this.touchControls?.relayout();
 		if (this.touchResizePreservesPlayerProgress()) {
+			return;
+		}
+		if (
+			!this.pendingTouchDeathRespawn &&
+			this.playerAwayFromTouchSpawnBand()
+		) {
 			return;
 		}
 		if (!forceSpawn && !this.playerOverlapsTouchGameplayButtons()) {
