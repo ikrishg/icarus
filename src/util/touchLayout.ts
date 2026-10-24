@@ -72,10 +72,17 @@ export function touchChromeMetrics(scene: Scene): TouchChromeMetrics {
 }
 
 /** Center Y for the level instruction panel on touch (clears HUD chrome). */
-export function touchInstructionPanelCenterY(scene: Scene): number {
+export function touchInstructionPanelCenterY(
+	scene: Scene,
+	livesText?: { active: boolean; getBounds(): Phaser.Geom.Rectangle },
+): number {
 	const chrome = touchChromeMetrics(scene);
 	const panelHalfH = 60;
 	const gapBelowHud = 16;
-	const minCenter = chrome.hudStackBottom + gapBelowHud + panelHalfH;
+	let hudBottom = chrome.hudStackBottom;
+	if (livesText?.active) {
+		hudBottom = Math.max(hudBottom, livesText.getBounds().bottom);
+	}
+	const minCenter = hudBottom + gapBelowHud + panelHalfH;
 	return Math.max(PLAY_HUD_CLEARANCE_Y + 110, minCenter);
 }
