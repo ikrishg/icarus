@@ -2969,22 +2969,19 @@ async function runPortraitDeathLandscapeSpawnMatrix(baseUrl) {
 		await portraitRoundTrip(page);
 		await waitForPlayReady(page, 25000);
 		await page.waitForTimeout(400);
-		await page.evaluate(() => {
-			window.__icarusGame?.scene
-				.getScene('Play')
-				?.requestTouchSpawnLandscapeSync?.();
-		});
 		const detail = await page.evaluate(() => {
 			const play = window.__icarusGame?.scene.getScene('Play');
 			if (!play?.player?.sprite?.body) {
 				return { ok: false, reason: 'no-body' };
 			}
-			const want = play.touchSpawnPosition();
+			const want = play.touchSpawnExpectedAtCurrentLayout?.();
 			const spawnX = play.player.sprite.x;
 			return {
 				spawnX,
-				wantX: want.x,
-				ok: Math.abs(spawnX - want.x) <= 8,
+				wantX: want?.x,
+				ok:
+					want &&
+					Math.abs(spawnX - want.x) <= 8,
 			};
 		});
 		if (!detail.ok) failures.push({ level: level + 1, ...detail });
@@ -3398,11 +3395,6 @@ async function runTouchRelayoutClearsHold(baseUrl) {
 		touchPoints: [],
 	});
 	await page.waitForTimeout(400);
-	await page.evaluate(() => {
-		window.__icarusGame?.scene
-			.getScene('Play')
-			?.touchControls?.releaseAllHolds?.();
-	});
 	const before = await getPlayerPos(page);
 	await page.waitForTimeout(800);
 	const after = await getPlayerPos(page);
@@ -3519,9 +3511,6 @@ async function runPortraitUnfreezeCases(baseUrl) {
 	await page.evaluate(() => {
 		window.dispatchEvent(new Event('resize'));
 		window.visualViewport?.dispatchEvent(new Event('resize'));
-		const play = window.__icarusGame?.scene.getScene('Play');
-		play?.handleDisplayResize?.();
-		play?.requestTouchSpawnLandscapeSync?.();
 	});
 	await page.waitForTimeout(1200);
 	await page.waitForFunction(
@@ -3548,6 +3537,43 @@ async function runPortraitUnfreezeCases(baseUrl) {
 	await page.locator('canvas').click();
 	const portraitKillRotateCase = await assertUnfrozenAndMoving(page);
 
+	// Die, respawn, move past spawn band, portrait→landscape: X must not snap to spawn
+	await resetPlayLevel(page, 0);
+	await page.locator('canvas').click();
+	await page.evaluate(() => {
+		window.__icarusGame?.scene.getScene('Play')?.killPlayer('fall', {
+			fast: true,
+			spendLife: false,
+		});
+	});
+	await page.waitForFunction(
+		() => {
+			const play = window.__icarusGame?.scene.getScene('Play');
+			return play && !play.isResetting && !play.player?.isDead;
+		},
+		undefined,
+		{ timeout: 20000 },
+	);
+	await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		const start = play.levelManager.current.start;
+		const y = start.y;
+		play.player.sprite.setPosition(920, y);
+		const body = play.player.sprite.body;
+		body.updateFromGameObject();
+	});
+	const progressX = (await getPlayerPos(page)).x;
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.waitForTimeout(500);
+	await page.setViewportSize({ width: 844, height: 390 });
+	await page.evaluate(() => {
+		window.dispatchEvent(new Event('resize'));
+		window.visualViewport?.dispatchEvent(new Event('resize'));
+	});
+	await page.waitForTimeout(1200);
+	const afterRotateX = (await getPlayerPos(page)).x;
+	const postDeathRotatePreservesX = Math.abs(afterRotateX - progressX) <= 8;
+
 	await browser.close();
 	return {
 		portraitUnfreezeOk:
@@ -3556,13 +3582,17 @@ async function runPortraitUnfreezeCases(baseUrl) {
 			gainCase.ok &&
 			levelCase.ok &&
 			portalTransitionCase.ok &&
-			portraitKillRotateCase.ok,
+			portraitKillRotateCase.ok &&
+			postDeathRotatePreservesX,
 		deathCase,
 		lossCase,
 		gainCase,
 		levelCase,
 		portalTransitionCase,
 		portraitKillRotateCase,
+		postDeathRotatePreservesX,
+		progressX,
+		afterRotateX,
 	};
 }
 
