@@ -3086,7 +3086,7 @@ async function runFireballFirstSpawnTiming(baseUrl) {
 		await new Promise((r) =>
 			requestAnimationFrame(() => requestAnimationFrame(r)),
 		);
-		const t0 = play?.time?.now ?? 0;
+		const t0 = play?.levelManager?.levelStartedAt ?? play?.time?.now ?? 0;
 		let ms = null;
 		for (let i = 0; i < 100; i++) {
 			await new Promise((r) => setTimeout(r, 25));
@@ -3124,7 +3124,7 @@ async function runFireballFirstSpawnTiming(baseUrl) {
 		await new Promise((r) =>
 			requestAnimationFrame(() => requestAnimationFrame(r)),
 		);
-		const t0 = play?.time?.now ?? 0;
+		const t0 = play?.levelManager?.levelStartedAt ?? play?.time?.now ?? 0;
 		let ms = null;
 		for (let i = 0; i < 100; i++) {
 			await new Promise((r) => setTimeout(r, 25));

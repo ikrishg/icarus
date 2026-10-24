@@ -139,6 +139,7 @@ export class Play extends Scene {
 	private pendingTouchLandscapeSpawn = false;
 	/** Set when death revive finishes; cleared after portrait→landscape touch spawn sync. */
 	private recentDeathNeedsLandscapeSpawnSync = false;
+	private lastResolvedTouchSpawn?: { x: number; y: number };
 	private runEndedOnDeath = false;
 	private resizePushGeneration = 0;
 	private resizePushTimer?: Phaser.Time.TimerEvent;
@@ -925,11 +926,15 @@ export class Play extends Scene {
 			return { x: Math.max(start.x, clusterMin), y: start.y };
 		}
 		out.x = Math.max(out.x, clusterMin);
+		this.lastResolvedTouchSpawn = out;
 		return out;
 	}
 
 	/** Read-only: expected spawn at the current touch layout (no shrink / relayout). */
 	touchSpawnPosition(): { x: number; y: number } {
+		if (this.lastResolvedTouchSpawn) {
+			return this.lastResolvedTouchSpawn;
+		}
 		const start = this.levelManager.current.start;
 		if (!this.player?.sprite?.body || !this.touchControls) {
 			return { x: start.x, y: start.y };
