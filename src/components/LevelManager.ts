@@ -1,6 +1,9 @@
 import type { GameObjects, Scene } from 'phaser';
 import { LEVELS } from '../data/levels';
-import { DEPTH_PLAY_HUD_BAR, DEPTH_PLAY_HUD_TEXT } from '../util/constants';
+import { isTouchDevice } from './TouchControls';
+import { DEPTH_PLAY_HUD_BAR, DEPTH_PLAY_HUD_TEXT, WIDTH } from '../util/constants';
+import { touchFontSizeStyle } from '../util/responsiveText';
+import { touchChromeMetrics, type TouchChromeMetrics } from '../util/touchLayout';
 import type { LevelDefinition, ObstacleDef, Point } from '../util/types';
 import { Fireball } from './Fireball';
 
@@ -20,7 +23,15 @@ export class LevelManager {
 	fireballs: Fireball[] = [];
 	fireballTimers: Phaser.Time.TimerEvent[] = [];
 	lavaTimers: Phaser.Time.TimerEvent[] = [];
+	levelStartedAt = 0;
+	/** When true, Play resets levelStartedAt when death reset finishes. */
+	deferLevelClockReset = false;
 	private hudObjects: Phaser.GameObjects.GameObject[] = [];
+
+	getHudTitle(): Phaser.GameObjects.Text | undefined {
+		const obj = this.hudObjects[0];
+		return obj instanceof Phaser.GameObjects.Text ? obj : undefined;
+	}
 
 	constructor(scene: Scene, levels: LevelDefinition[] = LEVELS) {
 		this.scene = scene;
@@ -54,11 +65,35 @@ export class LevelManager {
 		this.renderCurrent();
 	}
 
+	setFireballTimersPaused(paused: boolean): void {
+		for (const timer of this.fireballTimers) {
+			timer.paused = paused;
+		}
+	}
+
 	renderCurrent() {
 		this.portalTrigger = null;
-		this.visuals.clear(true, true);
-		this.hazards.clear(true, true);
-		this.platforms.clear(true, true);
+		try {
+			this.visuals?.clear(true, true);
+		} catch {
+			this.visuals = this.scene.add.group();
+		}
+		try {
+			this.hazards?.clear(true, true);
+		} catch {
+			this.hazards = this.scene.add.group();
+		}
+		if (!this.visuals?.active) {
+			this.visuals = this.scene.add.group();
+		}
+		if (!this.hazards?.active) {
+			this.hazards = this.scene.add.group();
+		}
+		try {
+			this.platforms?.clear(true, true);
+		} catch {
+			// stale static group
+		}
 		this.platforms = this.scene.physics.add.staticGroup();
 
 		// Clear fireballs and timers
@@ -76,7 +111,20 @@ export class LevelManager {
 		this.lavaTimers = [];
 
 		const level = this.current;
+		const play = this.scene.scene.get('Play') as
+			| { isResetting?: boolean }
+			| undefined;
+		if (play?.isResetting) {
+			this.deferLevelClockReset = true;
+		} else {
+			this.deferLevelClockReset = false;
+		}
 
+		const touch = isTouchDevice(this.scene);
+		const chrome = touch ? touchChromeMetrics(this.scene) : null;
+		const titleWrap = touch
+			? WIDTH - chrome!.rightReserve - chrome!.margin * 2
+			: this.scene.cameras.main.width - 80;
 		const title = this.scene.add
 			.text(
 				this.scene.cameras.main.width / 2,
@@ -84,10 +132,12 @@ export class LevelManager {
 				`Level ${this.currentIndex + 1}: ${level.name}`,
 				{
 					fontFamily: 'Pixelify Sans',
-					fontSize: '80px',
+					fontSize: touch ? touchFontSizeStyle(this.scene, 52) : '80px',
 					color: '#ffffff',
 					stroke: '#1b1b1c',
 					strokeThickness: 4,
+					align: 'center',
+					wordWrap: touch ? { width: titleWrap } : undefined,
 				},
 			)
 			.setOrigin(0.5, 0.5)
@@ -111,10 +161,7 @@ export class LevelManager {
 		this.visuals.add(titleBg);
 		this.hudObjects.push(titleBg);
 
-		const displayWidth =
-			this.scene.scale.displaySize?.width ??
-			(typeof window !== 'undefined' ? window.innerWidth : this.scene.scale.width);
-		if (displayWidth > 480) {
+		if (!isTouchDevice(this.scene)) {
 			const restartHint = this.scene.add
 				.text(
 					this.scene.cameras.main.width - 20,
@@ -256,34 +303,64 @@ export class LevelManager {
 						enemy.setFlipX(!enemy.flipX); // Flip sprite direction
 					},
 				});
-			} else if (o.type === 'fireball') {
-				// Spawn fireballs at intervals
-				const delay = o.delay || 0;
-				const interval = o.interval || 2000;
-
-				const spawnFireball = () => {
-					const fireball = new Fireball(this.scene, o.x, o.y);
-					this.fireballs.push(fireball);
-					this.hazards.add(fireball.sprite);
-
-					// Clean up destroyed fireballs
-					this.fireballs = this.fireballs.filter((fb) => fb.sprite?.active);
-				};
-
-				// Initial spawn after delay
-				this.scene.time.delayedCall(delay, spawnFireball);
-
-				// Repeat spawning
-				const timer = this.scene.time.addEvent({
-					delay: interval,
-					callback: spawnFireball,
-					loop: true,
-					startAt: delay,
-				});
-
-				this.fireballTimers.push(timer);
 			}
 		});
+
+		if (!this.deferLevelClockReset) {
+			this.commitFireballSpawnSchedule();
+		}
+	}
+
+	private commitFireballSpawnSchedule(): void {
+		this.levelStartedAt = this.scene.time.now;
+		for (const o of this.current.obstacles) {
+			if (o.type === 'fireball') {
+				this.addFireballTimer(o);
+			}
+		}
+	}
+
+	/** Re-anchor fireball timers to now (QA prepare / death resume). */
+	syncFireballSpawnClock(): void {
+		this.fireballs.forEach((fb) => {
+			fb.destroy();
+		});
+		this.fireballs = [];
+		this.fireballTimers.forEach((timer) => {
+			timer.remove();
+		});
+		this.fireballTimers = [];
+		this.commitFireballSpawnSchedule();
+	}
+
+	/** After death reset, align fireball spawns with levelStartedAt. */
+	applyDeferredLevelStartClock(): void {
+		if (!this.deferLevelClockReset) return;
+		this.deferLevelClockReset = false;
+		this.commitFireballSpawnSchedule();
+	}
+
+	private addFireballTimer(o: ObstacleDef & { type: 'fireball' }): void {
+		const delay = o.delay || 0;
+		const interval = o.interval || 2000;
+
+		const spawnFireball = () => {
+			const fireball = new Fireball(this.scene, o.x, o.y);
+			this.fireballs.push(fireball);
+			this.hazards.add(fireball.sprite);
+			this.fireballs = this.fireballs.filter((fb) => fb.sprite?.active);
+		};
+
+		const timer = this.scene.time.addEvent({
+			delay: interval,
+			callback: spawnFireball,
+			loop: true,
+			startAt: Math.max(0, interval - delay),
+		});
+		if (this.scene.time.paused) {
+			timer.paused = true;
+		}
+		this.fireballTimers.push(timer);
 	}
 
 	private addTiledGroundVisual(
@@ -328,12 +405,80 @@ export class LevelManager {
 		this.visuals.add(collider);
 	}
 
+	getWorldObstacleBounds(): Array<{
+		left: number;
+		right: number;
+		top: number;
+		bottom: number;
+	}> {
+		const rects: Array<{
+			left: number;
+			right: number;
+			top: number;
+			bottom: number;
+		}> = [];
+		for (const child of this.platforms.getChildren()) {
+			const body = (child as Phaser.GameObjects.Rectangle).body as
+				| Phaser.Physics.Arcade.StaticBody
+				| undefined;
+			if (!body) continue;
+			rects.push({
+				left: body.left,
+				right: body.right,
+				top: body.top,
+				bottom: body.bottom,
+			});
+		}
+		const portalBounds = this.getPortalBounds();
+		if (portalBounds) {
+			rects.push(portalBounds);
+		}
+		return rects;
+	}
+
+	getPortalBounds(): {
+		left: number;
+		right: number;
+		top: number;
+		bottom: number;
+	} | null {
+		if (!this.portal?.active || !('getBounds' in this.portal)) {
+			return null;
+		}
+		const b = this.portal.getBounds();
+		return {
+			left: b.left,
+			right: b.right,
+			top: b.top,
+			bottom: b.bottom,
+		};
+	}
+
 	setHudVisible(visible: boolean): void {
 		for (const obj of this.hudObjects) {
 			if ('setVisible' in obj && typeof obj.setVisible === 'function') {
 				obj.setVisible(visible);
 			}
 		}
+	}
+
+	relayoutTouchHudTitle(chrome: TouchChromeMetrics): void {
+		if (!isTouchDevice(this.scene)) return;
+		const title = this.hudObjects[0];
+		if (
+			!title ||
+			!('active' in title) ||
+			!(title as Phaser.GameObjects.GameObject).active ||
+			!('setPosition' in title) ||
+			!('setWordWrapWidth' in title)
+		) {
+			return;
+		}
+		const titleWrap = WIDTH - chrome.rightReserve - chrome.margin * 2;
+		(
+			title as Phaser.GameObjects.Text
+		).setWordWrapWidth(titleWrap);
+		(title as Phaser.GameObjects.Text).setPosition(WIDTH / 2, 50);
 	}
 
 	createPortal(x: number, y: number) {

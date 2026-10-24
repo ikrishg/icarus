@@ -35,3 +35,32 @@ body {
 	background-color: #000000;
 	touch-action: none;
 }
+
+#portrait-blocker {
+	display: none;
+	position: fixed;
+	inset: 0;
+	z-index: 10000;
+	align-items: center;
+	justify-content: center;
+	background-color: #0b1a2e;
+	color: #fdfdfe;
+	font-size: clamp(1.25rem, 5vw, 2rem);
+	text-align: center;
+	padding: 2rem;
+}
+
+#portrait-blocker p {
+	margin: 0;
+	max-width: 20ch;
+}
+
+@media (orientation: portrait) and (max-width: 600px) and (pointer: coarse) {
+	#portrait-blocker {
+		display: flex;
+	}
+
+	#icarus-window {
+		pointer-events: none;
+	}
+}

@@ -2,6 +2,7 @@ import type { Scene } from 'phaser';
 import type { AbilityManager } from './AbilityManager';
 import { Arrow } from './Arrow';
 import type { TouchControls } from './TouchControls';
+import { WIDTH } from '../util/constants';
 
 export class Player {
 	scene: Scene;
@@ -31,11 +32,14 @@ export class Player {
 	lastArrowTime = 0;
 	readonly ARROW_COOLDOWN = 500; // ms between arrows
 	isDashing = false;
+	private dashStartedInAir = false;
+	private prevBodyCenterX: number | null = null;
 	dashDirection = 0;
 	lastDashTime = 0;
 	readonly DASH_COOLDOWN = 1000; // ms between dashes
 	controlsEnabled = true; // Can be disabled during ability choice screens
 	touchControls: TouchControls | null = null;
+	private keyboardDashQueued = false;
 
 	constructor(
 		scene: Scene,
@@ -55,11 +59,12 @@ export class Player {
 
 		// Set collision properties
 		this.sprite.setBounce(0.1);
-		this.sprite.setCollideWorldBounds(false);
+		this.sprite.setCollideWorldBounds(true);
 
 		const body = this.sprite.body as Phaser.Physics.Arcade.Body;
 		body.setSize(24, 44);
 		body.setOffset(15, 12);
+		body.setCollideWorldBounds(true);
 
 		// Setup keyboard controls
 		this.cursors = this.scene.input.keyboard?.createCursorKeys();
@@ -86,11 +91,54 @@ export class Player {
 			this.spaceKey = this.scene.input.keyboard.addKey(
 				Phaser.Input.Keyboard.KeyCodes.SPACE,
 			);
+			this.wasd.right.on('down', () => {
+				this.sprite.setFlipX(false);
+				if (this.qKey?.isDown) {
+					this.queueKeyboardDash();
+				}
+			});
+			this.wasd.left.on('down', () => {
+				if (this.abilityManager.abilities.canMoveLeft) {
+					this.sprite.setFlipX(true);
+					if (this.qKey?.isDown) {
+						this.queueKeyboardDash();
+					}
+				}
+			});
+			this.qKey.on('down', () => this.queueKeyboardDash());
+		}
+	}
+
+	private canQueueKeyboardDash(): boolean {
+		if (!this.controlsEnabled || this.isDead || !this.abilityManager.canDash()) {
+			return false;
+		}
+		const play = this.scene as {
+			isPaused?: boolean;
+			isResetting?: boolean;
+			pausePanel?: unknown;
+		};
+		if (play.isPaused || play.isResetting || play.pausePanel) {
+			return false;
+		}
+		return true;
+	}
+
+	private queueKeyboardDash(): void {
+		if (this.canQueueKeyboardDash()) {
+			this.keyboardDashQueued = true;
 		}
 	}
 
 	update() {
-		if (!this.sprite.body || this.isDead || !this.controlsEnabled) return;
+		if (!this.sprite.body || this.isDead) {
+			this.keyboardDashQueued = false;
+			return;
+		}
+		if (!this.canQueueKeyboardDash()) {
+			this.keyboardDashQueued = false;
+		}
+		if (!this.controlsEnabled) return;
 
 		this.touchControls?.beginFrame();
 		const touch = this.touchControls?.getInput();
@@ -100,24 +148,41 @@ export class Player {
 		// Reset jump count when touching ground
 		if (body.touching.down) {
 			this.jumpCount = 0;
-			this.isDashing = false;
-		}
-
-		// Check for dash input BEFORE movement
-		const dashPressed =
-			Phaser.Input.Keyboard.JustDown(this.qKey as Phaser.Input.Keyboard.Key) ||
-			touch?.dashJustDown;
-		if (this.abilityManager.canDash() && dashPressed) {
-			const now = Date.now();
-			if (now - this.lastDashTime > this.DASH_COOLDOWN) {
-				this.performDash();
-				this.lastDashTime = now;
+			if (this.isDashing && this.dashStartedInAir) {
+				this.isDashing = false;
 			}
 		}
 
-		// Handle dash
 		const moveSpeed = this.abilityManager.getMoveSpeed();
 		const canMoveLeft = this.abilityManager.abilities.canMoveLeft;
+
+		const leftDown =
+			this.cursors?.left.isDown || this.wasd?.left.isDown || touch?.left;
+		const rightDown =
+			this.cursors?.right.isDown || this.wasd?.right.isDown || touch?.right;
+
+		// Dash before movement; keyboard queue handles Q/D same-frame presses
+		if (this.abilityManager.canDash()) {
+			const keyboardDash =
+				this.keyboardDashQueued && this.canQueueKeyboardDash();
+			this.keyboardDashQueued = false;
+			const dashPressed = keyboardDash || touch?.dashJustDown;
+			if (dashPressed) {
+				const now = Date.now();
+				if (now - this.lastDashTime > this.DASH_COOLDOWN) {
+					if (rightDown) {
+						this.sprite.setFlipX(false);
+					} else if (leftDown && canMoveLeft) {
+						this.sprite.setFlipX(true);
+					}
+					this.performDash();
+					this.lastDashTime = now;
+				}
+			}
+		}
+
+		const minCenter = body.halfWidth;
+		const maxCenter = WIDTH - body.halfWidth;
 
 		if (this.isDashing) {
 			this.sprite.setVelocityX(this.DASH_SPEED * this.dashDirection);
@@ -125,20 +190,32 @@ export class Player {
 			return; // Skip normal movement during dash
 		}
 
-		const leftDown =
-			this.cursors?.left.isDown || this.wasd?.left.isDown || touch?.left;
-		const rightDown =
-			this.cursors?.right.isDown || this.wasd?.right.isDown || touch?.right;
-
-		// Horizontal movement
-		if (leftDown && canMoveLeft) {
+		// Horizontal movement (do not set velocity into a wall; poststep fixes true overshoot)
+		if (
+			leftDown &&
+			canMoveLeft &&
+			body.center.x > minCenter &&
+			!body.blocked.left
+		) {
 			this.sprite.setVelocityX(-moveSpeed);
-			this.sprite.setFlipX(true); // Flip sprite to face left
-		} else if (rightDown) {
+			this.sprite.setFlipX(true);
+		} else if (rightDown && body.center.x < maxCenter && !body.blocked.right) {
 			this.sprite.setVelocityX(moveSpeed);
-			this.sprite.setFlipX(false); // Face right
+			this.sprite.setFlipX(false);
 		} else {
 			this.sprite.setVelocityX(0);
+		}
+		if (leftDown && body.blocked.left) {
+			body.velocity.x = 0;
+		}
+		if (rightDown && body.blocked.right) {
+			body.velocity.x = 0;
+		}
+		if (body.center.x <= minCenter && body.velocity.x < 0) {
+			body.velocity.x = 0;
+		}
+		if (body.center.x >= maxCenter && body.velocity.x > 0) {
+			body.velocity.x = 0;
 		}
 
 		// Jumping (with ability-based max jumps)
@@ -180,6 +257,72 @@ export class Player {
 		this.sprite.setRotation(rotation);
 	}
 
+	/** Post-step only: correct when the body center is past the world edge (dash / knockback). */
+	clampHorizontalWorldBounds(body: Phaser.Physics.Arcade.Body): void {
+		const minCenter = body.halfWidth;
+		const maxCenter = WIDTH - body.halfWidth;
+		const centerX = body.center.x;
+		if (
+			this.prevBodyCenterX != null &&
+			body.blocked.left &&
+			centerX < this.prevBodyCenterX &&
+			centerX > minCenter + 8
+		) {
+			this.sprite.x += this.prevBodyCenterX - centerX;
+			body.updateFromGameObject();
+			body.velocity.x = 0;
+		}
+		this.prevBodyCenterX = body.center.x;
+		if (centerX < minCenter) {
+			if (body.velocity.x < 0) {
+				body.velocity.x = 0;
+			}
+			this.sprite.x += minCenter - centerX;
+			body.updateFromGameObject();
+			return;
+		}
+		if (
+			body.touching.down &&
+			centerX > minCenter &&
+			centerX <= minCenter + 3
+		) {
+			if (body.velocity.x < 0) {
+				body.velocity.x = 0;
+			}
+			this.sprite.x += minCenter - centerX;
+			body.updateFromGameObject();
+			return;
+		}
+		if (centerX > maxCenter) {
+			if (body.velocity.x > 0) {
+				body.velocity.x = 0;
+			}
+			this.sprite.x += maxCenter - centerX;
+			body.updateFromGameObject();
+			return;
+		}
+		if (
+			body.touching.down &&
+			centerX < maxCenter &&
+			centerX >= maxCenter - 3
+		) {
+			if (body.velocity.x > 0) {
+				body.velocity.x = 0;
+			}
+			this.sprite.x += maxCenter - centerX;
+			body.updateFromGameObject();
+		}
+		if (body.blocked.left || body.blocked.right) {
+			const snapped = Math.round(body.center.x);
+			const err = snapped - body.center.x;
+			if (Math.abs(err) <= 1) {
+				this.sprite.x += err;
+				body.updateFromGameObject();
+				this.prevBodyCenterX = body.center.x;
+			}
+		}
+	}
+
 	private updatePlayerAnimation(
 		body: Phaser.Physics.Arcade.Body,
 		canMoveLeft: boolean,
@@ -201,13 +344,36 @@ export class Player {
 		}
 	}
 
+	private dashDirectionFromInput(): number {
+		const touch = this.touchControls?.getInput();
+		const canMoveLeft = this.abilityManager.abilities.canMoveLeft;
+		const rightDown =
+			this.cursors?.right.isDown ||
+			this.wasd?.right.isDown ||
+			Boolean(touch?.right);
+		const leftDown =
+			this.cursors?.left.isDown ||
+			this.wasd?.left.isDown ||
+			Boolean(touch?.left);
+		if (rightDown) {
+			this.sprite.setFlipX(false);
+			return 1;
+		}
+		if (leftDown && canMoveLeft) {
+			this.sprite.setFlipX(true);
+			return -1;
+		}
+		return this.sprite.flipX ? -1 : 1;
+	}
+
 	performDash() {
 		// Play shoot sound for dash
 		this.scene.sound.play('shoot', { volume: 0.4 });
 
+		const body = this.sprite.body as Phaser.Physics.Arcade.Body;
+		this.dashStartedInAir = !body.touching.down;
 		this.isDashing = true;
-		// Dash in the direction player is facing
-		this.dashDirection = this.sprite.flipX ? -1 : 1;
+		this.dashDirection = this.dashDirectionFromInput();
 
 		// End dash after duration
 		this.scene.time.delayedCall(this.DASH_DURATION, () => {
@@ -234,18 +400,31 @@ export class Player {
 	}
 
 	revive(x: number, y: number) {
+		this.keyboardDashQueued = false;
 		this.isDead = false;
 		this.sprite.clearTint();
 		this.sprite.setRotation(0);
-		this.sprite.setAngularVelocity(0);
-		this.sprite.play('player-idle');
+		const body = this.sprite.body as Phaser.Physics.Arcade.Body | null;
+		if (body) {
+			body.enable = true;
+			body.setAllowGravity(true);
+			this.sprite.setAngularVelocity(0);
+		}
+		if (this.sprite.anims?.exists('player-idle')) {
+			this.sprite.play('player-idle');
+		}
 		this.setPosition(x, y);
 	}
 
 	setPosition(x: number, y: number) {
 		this.sprite.setPosition(x, y);
-		this.sprite.setVelocity(0, 0);
+		const body = this.sprite.body as Phaser.Physics.Arcade.Body | null;
+		if (body?.setVelocity) {
+			body.updateFromGameObject();
+			body.setVelocity(0, 0);
+		}
 		this.jumpCount = 0;
+		this.prevBodyCenterX = null;
 	}
 
 	destroy() {
