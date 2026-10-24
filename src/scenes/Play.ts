@@ -139,7 +139,6 @@ export class Play extends Scene {
 	private pendingTouchLandscapeSpawn = false;
 	/** Set when death revive finishes; cleared after portrait→landscape touch spawn sync. */
 	private recentDeathNeedsLandscapeSpawnSync = false;
-	private lastResolvedTouchSpawn?: { x: number; y: number };
 	private runEndedOnDeath = false;
 	private resizePushGeneration = 0;
 	private resizePushTimer?: Phaser.Time.TimerEvent;
@@ -926,32 +925,26 @@ export class Play extends Scene {
 			return { x: Math.max(start.x, clusterMin), y: start.y };
 		}
 		out.x = Math.max(out.x, clusterMin);
-		this.lastResolvedTouchSpawn = out;
 		return out;
 	}
 
-	/** Read-only: expected spawn at the current touch layout (no shrink / relayout). */
+	/** Expected spawn at current touch layout (matches resolveTouchSpawnPlacement). */
 	touchSpawnPosition(): { x: number; y: number } {
-		if (this.lastResolvedTouchSpawn) {
-			return this.lastResolvedTouchSpawn;
-		}
 		const start = this.levelManager.current.start;
-		if (!this.player?.sprite?.body || !this.touchControls) {
+		if (!this.player?.sprite?.body || !this.touchControls?.visible) {
 			return { x: start.x, y: start.y };
 		}
 		if (!isTouchDevice(this)) {
 			return { x: start.x, y: start.y };
 		}
-		if (!this.touchControls.visible) {
-			return (
-				this.pickTouchSpawnAtCurrentLayout() ??
-				this.touchSpawnFallbackPosition()
-			);
-		}
-		return (
-			this.pickTouchSpawnAtCurrentLayout() ??
-			this.touchSpawnFallbackPosition()
-		);
+		const sprite = this.player.sprite;
+		const body = sprite.body as Phaser.Physics.Arcade.Body;
+		const prevX = sprite.x;
+		const prevY = sprite.y;
+		const pos = this.resolveTouchSpawnPlacement();
+		sprite.setPosition(prevX, prevY);
+		body.updateFromGameObject();
+		return pos;
 	}
 
 	resetPlayer() {
