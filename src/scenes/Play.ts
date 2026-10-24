@@ -228,6 +228,9 @@ export class Play extends Scene {
 				}
 				return track?.samples ?? [];
 			};
+			window.__icarusApplyTouchSpawnExpectation = () => {
+				this.applyTouchSpawnAtCurrentLayoutExpectation();
+			};
 			window.__icarusPrepareLevel = (levelIndex: number) => {
 				try {
 					if (!this.scene?.isActive() || !this.player || !this.physics?.world) {
@@ -1401,7 +1404,7 @@ export class Play extends Scene {
 		}
 		this.touchControls.relayout();
 		this.relayoutTouchChromeHud();
-		const spawn = this.resolveTouchSpawnPlacement();
+		const spawn = this.computeTouchSpawnCoords(false);
 		this.player.setPosition(spawn.x, spawn.y);
 		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
 		body.updateFromGameObject();

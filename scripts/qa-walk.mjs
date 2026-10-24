@@ -1555,7 +1555,9 @@ async function runTouchSpawnSafety(baseUrl) {
 		for (let level = 0; level < 15; level++) {
 			await page.evaluate((idx) => {
 				window.__icarusPrepareLevel?.(idx);
-				window.__icarusGame?.scene.getScene('Play')?.handleDisplayResize?.();
+				const play = window.__icarusGame?.scene.getScene('Play');
+				play?.handleDisplayResize?.();
+				window.__icarusApplyTouchSpawnExpectation?.();
 			}, level);
 			for (const phase of ['spawn-check', 'death-respawn']) {
 			const result = await page.evaluate(async ({ idx, phase, vpWidth, spawnPad }) => {
