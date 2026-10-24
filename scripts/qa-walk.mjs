@@ -744,6 +744,22 @@ async function assertUnfrozenAndMoving(page) {
 	};
 }
 
+async function dispatchBrowserResizeEvents(page) {
+	await page.evaluate(() => {
+		window.dispatchEvent(new Event('resize'));
+		window.visualViewport?.dispatchEvent(new Event('resize'));
+	});
+}
+
+async function portraitLandscapeViaBrowserResize(page, landscapeVp) {
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.waitForTimeout(300);
+	await page.setViewportSize(landscapeVp);
+	await page.waitForTimeout(300);
+	await dispatchBrowserResizeEvents(page);
+	await page.waitForTimeout(500);
+}
+
 async function portraitRoundTrip(page) {
 	await page.setViewportSize({ width: 390, height: 844 });
 	await page.waitForTimeout(500);
@@ -2943,6 +2959,96 @@ async function runTouchChromeLivesGap(baseUrl) {
 	return { touchChromeLivesGapOk: failures.length === 0, failures };
 }
 
+async function runDeathRotateTouchSpawnProbeMatrix(baseUrl) {
+	const levelIndices = [0, 1, 2, 5, 7, 11, 13];
+	const viewports = [
+		{ width: 568, height: 320 },
+		{ width: 640, height: 360 },
+		{ width: 844, height: 390 },
+		{ width: 932, height: 430 },
+	];
+	const delays = [100, 600, 1200];
+	const failures = [];
+	const browser = await chromium.launch();
+	const page = await browser.newPage({
+		viewport: { width: 844, height: 390 },
+		isMobile: true,
+		hasTouch: true,
+	});
+	await bootToPlay(page, baseUrl);
+	for (const levelIndex of levelIndices) {
+		for (const vp of viewports) {
+			for (const delayMs of delays) {
+				await page.setViewportSize(vp);
+				await page.waitForTimeout(300);
+				await dispatchBrowserResizeEvents(page);
+				await page.evaluate((idx) => {
+					window.__icarusPrepareLevel?.(idx);
+				}, levelIndex);
+				await waitForPlayReady(page, 20000);
+				const livesBefore = await page.evaluate(() => {
+					const play = window.__icarusGame?.scene.getScene('Play');
+					play.lives = 99;
+					play.updateLivesHud?.();
+					return play.lives;
+				});
+				await page.evaluate(() => {
+					window.__icarusGame?.scene
+						.getScene('Play')
+						?.killPlayer('spikes');
+				});
+				await page.waitForTimeout(delayMs);
+				await portraitLandscapeViaBrowserResize(page, vp);
+				await page.waitForFunction(
+					() => {
+						const play = window.__icarusGame?.scene.getScene('Play');
+						return (
+							play && !play.isResetting && !play.player?.isDead
+						);
+					},
+					undefined,
+					{ timeout: 35000 },
+				);
+				await page.waitForTimeout(400);
+				const detail = await page.evaluate((before) => {
+					const play = window.__icarusGame?.scene.getScene('Play');
+					if (!play?.player?.sprite) {
+						return { ok: false, reason: 'no-player' };
+					}
+					const want = play.touchSpawnExpectedAtCurrentLayout?.();
+					const x = play.player.sprite.x;
+					const livesAfter = play.lives;
+					const livesOk = livesAfter === before - 1;
+					const spawnOk =
+						want && Math.abs(x - want.x) <= 8;
+					return {
+						ok: Boolean(spawnOk && livesOk),
+						spawnOk: Boolean(spawnOk),
+						livesOk,
+						x,
+						wantX: want?.x,
+						livesAfter,
+					};
+				}, livesBefore);
+				if (!detail.ok) {
+					failures.push({
+						level: levelIndex + 1,
+						viewport: vp,
+						delayMs,
+						...detail,
+					});
+				}
+			}
+		}
+	}
+	await browser.close();
+	return {
+		deathRotateTouchSpawnProbeOk: failures.length === 0,
+		failures,
+		cases: levelIndices.length * viewports.length * delays.length,
+	};
+}
+
 async function runPortraitDeathLandscapeSpawnMatrix(baseUrl) {
 	const failures = [];
 	const browser = await chromium.launch();
@@ -4201,6 +4307,13 @@ async function main() {
 		console.log(JSON.stringify({ l15RealKeys }, null, 2));
 		process.exit(l15RealKeys.l15RealKeysOk ? 0 : 1);
 	}
+	if (process.env.QA_DEATH_ROTATE_PROBE === '1') {
+		const deathRotateTouchSpawnProbe =
+			await runDeathRotateTouchSpawnProbeMatrix(baseUrl);
+		server.close();
+		console.log(JSON.stringify({ deathRotateTouchSpawnProbe }, null, 2));
+		process.exit(deathRotateTouchSpawnProbe.deathRotateTouchSpawnProbeOk ? 0 : 1);
+	}
 	const pause = await runPauseEscToggle(baseUrl);
 	const desktop = await runDesktop(baseUrl);
 	const debug = await runDebugCheat(baseUrl);
@@ -4236,6 +4349,8 @@ async function main() {
 	}
 	const resizeProgressHold = await runResizeProgressHold(baseUrl);
 	const touchChromeLivesGap = await runTouchChromeLivesGap(baseUrl);
+	const deathRotateTouchSpawnProbe =
+		await runDeathRotateTouchSpawnProbeMatrix(baseUrl);
 	const portraitDeathLandscapeSpawn =
 		await runPortraitDeathLandscapeSpawnMatrix(baseUrl);
 	const touchArrowSlide = await runTouchArrowSlide(baseUrl);
@@ -4294,6 +4409,7 @@ async function main() {
 		wallDashThrottled.wallDashBoundsThrottledOk &&
 		resizeProgressHold.resizeProgressHoldOk &&
 		touchChromeLivesGap.touchChromeLivesGapOk &&
+		deathRotateTouchSpawnProbe.deathRotateTouchSpawnProbeOk &&
 		portraitDeathLandscapeSpawn.portraitDeathLandscapeSpawnOk &&
 		touchArrowSlide.touchArrowSlideOk &&
 		fireballFirstSpawnTiming.fireballFirstSpawnTimingOk &&
@@ -4358,6 +4474,7 @@ async function main() {
 				wallDashThrottled,
 				resizeProgressHold,
 				touchChromeLivesGap,
+				deathRotateTouchSpawnProbe,
 				portraitDeathLandscapeSpawn,
 				touchArrowSlide,
 				fireballFirstSpawnTiming,

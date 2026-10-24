@@ -137,8 +137,9 @@ export class Play extends Scene {
 	private isPaused = false;
 	private portraitBlockerPauseActive = false;
 	private pendingTouchLandscapeSpawn = false;
-	/** Set when death revive finishes; cleared after portrait→landscape touch spawn sync. */
-	private recentDeathNeedsLandscapeSpawnSync = false;
+	/** Death respawn still needs landscape touch spawn (not cached at death/onRebuild). */
+	private pendingTouchDeathRespawn = false;
+	private portraitMediaActive = false;
 	private runEndedOnDeath = false;
 	private resizePushGeneration = 0;
 	private resizePushTimer?: Phaser.Time.TimerEvent;
@@ -223,6 +224,7 @@ export class Play extends Scene {
 						this.clearColliders();
 						this.isResetting = false;
 						this.pendingTouchLandscapeSpawn = false;
+						this.pendingTouchDeathRespawn = false;
 						this.player.isDead = false;
 						this.player.controlsEnabled = true;
 						this.levelManager.goto(levelIndex);
@@ -275,6 +277,7 @@ export class Play extends Scene {
 					blockerMq.removeListener(onBlockerChange);
 				}
 			});
+			this.portraitMediaActive = isPortraitBlockerActive();
 			this.syncPortraitBlockerPause();
 		}
 
@@ -467,13 +470,12 @@ export class Play extends Scene {
 				if (this.player) {
 					this.player.controlsEnabled = true;
 				}
-				if (
-					this.touchControls?.visible &&
-					isPortraitBlockerActive()
-				) {
-					this.recentDeathNeedsLandscapeSpawnSync = true;
-				} else {
-					this.recentDeathNeedsLandscapeSpawnSync = false;
+				if (this.pendingTouchDeathRespawn) {
+					if (!isPortraitBlockerActive()) {
+						this.applyTouchRespawnAtCurrentLayout();
+					} else {
+						this.pendingTouchLandscapeSpawn = true;
+					}
 				}
 				finishDeath();
 			},
@@ -493,7 +495,22 @@ export class Play extends Scene {
 		this.clearColliders();
 		this.levelManager.goto(levelIndex);
 		this.refreshTouchSpawnLayout();
-		const spawnPos = this.resolveTouchSpawnPlacement();
+		const deferTouchSpawn =
+			this.isResetting &&
+			isTouchDevice(this) &&
+			Boolean(this.touchControls?.visible) &&
+			isPortraitBlockerActive();
+		let spawnPos: { x: number; y: number };
+		if (deferTouchSpawn) {
+			this.pendingTouchDeathRespawn = true;
+			const start = this.levelManager.current.start;
+			spawnPos = { x: start.x, y: start.y };
+		} else {
+			spawnPos = this.resolveTouchSpawnPlacement();
+			if (this.isResetting && this.touchControls?.visible) {
+				this.pendingTouchDeathRespawn = false;
+			}
+		}
 		this.player.revive(spawnPos.x, spawnPos.y);
 		this.setupLevelColliders();
 		this.relayoutTouchChromeHud();
@@ -1020,29 +1037,28 @@ export class Play extends Scene {
 	};
 
 	handleDisplayResize(): void {
-		const portraitBlockerWasActive = this.portraitBlockerPauseActive;
+		const wasPortraitMedia = this.portraitMediaActive;
+		const portraitMedia = isPortraitBlockerActive();
+		this.portraitMediaActive = portraitMedia;
 		this.touchControls?.relayout();
 		this.relayoutTouchChromeHud();
 		this.relayoutLevelInstructionIfVisible();
 		const leavingPortrait =
 			this.touchControls?.visible &&
-			portraitBlockerWasActive &&
-			!isPortraitBlockerActive();
+			wasPortraitMedia &&
+			!portraitMedia;
 		if (leavingPortrait) {
 			this.pendingTouchLandscapeSpawn = true;
 		}
 		this.syncPortraitBlockerPause();
-		if (leavingPortrait) {
-			if (
-				this.recentDeathNeedsLandscapeSpawnSync &&
-				!this.touchResizePreservesPlayerProgress()
-			) {
-				this.recentDeathNeedsLandscapeSpawnSync = false;
-				this.requestTouchSpawnLandscapeSync();
-			} else {
-				this.recentDeathNeedsLandscapeSpawnSync = false;
-				this.syncTouchLandscapeSpawnIfNeeded();
-			}
+		if (
+			leavingPortrait &&
+			this.pendingTouchDeathRespawn &&
+			!this.touchResizePreservesPlayerProgress()
+		) {
+			this.applyTouchRespawnAtCurrentLayout();
+		} else if (leavingPortrait) {
+			this.syncTouchLandscapeSpawnIfNeeded();
 		} else {
 			this.syncTouchLandscapeSpawnIfNeeded();
 		}
@@ -1200,6 +1216,7 @@ export class Play extends Scene {
 		if (!isTouchDevice(this)) return;
 		const world = this.physics?.world;
 		if (!world) return;
+		this.portraitMediaActive = isPortraitBlockerActive();
 		if (isPortraitBlockerActive()) {
 			if (this.pausePanel) return;
 			if (this.isResetting || this.deathSequence?.isEscBlocked()) {
@@ -1239,7 +1256,34 @@ export class Play extends Scene {
 				this.player.controlsEnabled = true;
 			}
 		}
+		if (
+			!isPortraitBlockerActive() &&
+			this.pendingTouchDeathRespawn &&
+			this.player &&
+			!this.player.isDead
+		) {
+			this.applyTouchRespawnAtCurrentLayout();
+		}
 		this.syncTouchLandscapeSpawnIfNeeded();
+	}
+
+	/** Apply touch spawn for a death respawn using the current (landscape) layout. */
+	private applyTouchRespawnAtCurrentLayout(): void {
+		if (
+			!this.player?.sprite?.body ||
+			!this.touchControls?.visible ||
+			isPortraitBlockerActive()
+		) {
+			return;
+		}
+		this.touchControls.relayout();
+		this.relayoutTouchChromeHud();
+		const spawn = this.resolveTouchSpawnPlacement();
+		this.player.setPosition(spawn.x, spawn.y);
+		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
+		body.updateFromGameObject();
+		this.pendingTouchDeathRespawn = false;
+		this.pendingTouchLandscapeSpawn = false;
 	}
 
 	/** QA / portrait return: snap player to touch spawn when layout changed. */
@@ -1258,13 +1302,11 @@ export class Play extends Scene {
 		this.pendingTouchLandscapeSpawn = false;
 		this.touchControls?.relayout();
 		if (this.touchResizePreservesPlayerProgress()) {
-			this.recentDeathNeedsLandscapeSpawnSync = false;
 			return;
 		}
 		if (!forceSpawn && !this.playerOverlapsTouchGameplayButtons()) {
 			return;
 		}
-		this.recentDeathNeedsLandscapeSpawnSync = false;
 		const spawn = this.resolveTouchSpawnPlacement();
 		this.player.setPosition(spawn.x, spawn.y);
 		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
