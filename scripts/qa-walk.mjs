@@ -3120,10 +3120,6 @@ async function runFireballFirstSpawnTiming(baseUrl) {
 		await new Promise((r) =>
 			requestAnimationFrame(() => requestAnimationFrame(r)),
 		);
-		play?.levelManager?.syncFireballSpawnClock?.();
-		await new Promise((r) =>
-			requestAnimationFrame(() => requestAnimationFrame(r)),
-		);
 		const t0 = play?.levelManager?.levelStartedAt ?? play?.time?.now ?? 0;
 		let ms = null;
 		for (let i = 0; i < 100; i++) {
@@ -3486,7 +3482,6 @@ async function runPortraitUnfreezeCases(baseUrl) {
 	await resetPlayLevel(page, 0);
 	await portraitRoundTrip(page);
 	await waitForPlayReady(page, 8000);
-	await snapPlayerToLevelStart(page);
 	await page.waitForTimeout(1600);
 	await page.locator('canvas').click();
 	const levelCase = await assertUnfrozenAndMoving(page);
@@ -3550,7 +3545,6 @@ async function runPortraitUnfreezeCases(baseUrl) {
 		undefined,
 		{ timeout: 15000 },
 	);
-	await snapPlayerToLevelStart(page);
 	await page.locator('canvas').click();
 	const portraitKillRotateCase = await assertUnfrozenAndMoving(page);
 
@@ -3960,9 +3954,8 @@ async function runTouchUrlBarShrinkAsserts(baseUrl) {
 		await page.setViewportSize(caseDef.shrink);
 		await page.waitForTimeout(650);
 		await page.evaluate(() => {
-			const play = window.__icarusGame?.scene.getScene('Play');
-			play?.touchControls?.releaseAllHolds?.();
-			play?.handleDisplayResize?.();
+			window.dispatchEvent(new Event('resize'));
+			window.visualViewport?.dispatchEvent(new Event('resize'));
 		});
 		await page.waitForTimeout(350);
 		const hud = await collectTouchHudOverlap(page);
