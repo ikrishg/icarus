@@ -10,4 +10,11 @@ interface ImportMeta {
 
 interface Window {
 	__icarusHoldAbilityCards?: boolean;
+	__icarusDeathSpawnXTrack?: {
+		active: boolean;
+		revived: boolean;
+		samples: number[];
+	};
+	__icarusBeginDeathSpawnXTrack?: () => void;
+	__icarusEndDeathSpawnXTrack?: () => number[];
 }

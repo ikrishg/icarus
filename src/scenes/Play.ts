@@ -212,6 +212,20 @@ export class Play extends Scene {
 		window.__icarusGetLives = () => this.lives;
 		if (import.meta.env.DEV || import.meta.env.VITE_ENABLE_QA_HOOKS === 'true') {
 			window.__icarusTouchChromeMetrics = () => touchChromeMetrics(this);
+			window.__icarusBeginDeathSpawnXTrack = () => {
+				window.__icarusDeathSpawnXTrack = {
+					active: true,
+					revived: false,
+					samples: [],
+				};
+			};
+			window.__icarusEndDeathSpawnXTrack = () => {
+				const track = window.__icarusDeathSpawnXTrack;
+				if (track) {
+					track.active = false;
+				}
+				return track?.samples ?? [];
+			};
 			window.__icarusPrepareLevel = (levelIndex: number) => {
 				try {
 					if (!this.scene?.isActive() || !this.player || !this.physics?.world) {
@@ -325,6 +339,15 @@ export class Play extends Scene {
 	}
 
 	update() {
+		const deathSpawnTrack = window.__icarusDeathSpawnXTrack;
+		if (
+			deathSpawnTrack?.active &&
+			deathSpawnTrack.revived &&
+			this.isResetting &&
+			this.player?.sprite
+		) {
+			deathSpawnTrack.samples.push(this.player.sprite.x);
+		}
 		if (isTouchDevice(this)) {
 			if (
 				isPortraitBlockerActive() &&
@@ -471,7 +494,7 @@ export class Play extends Scene {
 					this.player.controlsEnabled = true;
 				}
 				if (this.pendingTouchDeathRespawn) {
-					if (!isPortraitBlockerActive()) {
+					if (!this.touchDeathSpawnLayoutDeferred()) {
 						this.applyTouchRespawnAtCurrentLayout();
 					} else {
 						this.pendingTouchLandscapeSpawn = true;
@@ -495,19 +518,29 @@ export class Play extends Scene {
 		this.clearColliders();
 		this.levelManager.goto(levelIndex);
 		this.refreshTouchSpawnLayout();
-		const deferTouchSpawn =
+		let spawnPos: { x: number; y: number };
+		if (
 			this.isResetting &&
 			isTouchDevice(this) &&
-			Boolean(this.touchControls?.visible);
-		let spawnPos: { x: number; y: number };
-		if (deferTouchSpawn) {
-			this.pendingTouchDeathRespawn = true;
-			const start = this.levelManager.current.start;
-			spawnPos = { x: start.x, y: start.y };
+			this.touchControls?.visible
+		) {
+			if (this.touchDeathSpawnLayoutDeferred()) {
+				this.pendingTouchDeathRespawn = true;
+				const start = this.levelManager.current.start;
+				spawnPos = { x: start.x, y: start.y };
+			} else {
+				this.pendingTouchDeathRespawn = false;
+				this.scale.refresh();
+				spawnPos = this.resolveTouchSpawnPlacement();
+			}
 		} else {
 			spawnPos = this.resolveTouchSpawnPlacement();
 		}
 		this.player.revive(spawnPos.x, spawnPos.y);
+		const deathSpawnTrack = window.__icarusDeathSpawnXTrack;
+		if (deathSpawnTrack?.active && this.isResetting) {
+			deathSpawnTrack.revived = true;
+		}
 		this.setupLevelColliders();
 		this.relayoutTouchChromeHud();
 		this.showLevelInstruction();
@@ -1264,6 +1297,25 @@ export class Play extends Scene {
 	}
 
 	/** Apply touch spawn for a death respawn using the current (landscape) layout. */
+	/** Portrait blocker or stale portrait-shaped Phaser displaySize on landscape window. */
+	private touchDeathSpawnLayoutDeferred(): boolean {
+		if (!isTouchDevice(this) || !this.touchControls?.visible) {
+			return false;
+		}
+		if (isPortraitBlockerActive()) {
+			return true;
+		}
+		if (typeof window === 'undefined') {
+			return false;
+		}
+		if (window.innerWidth < window.innerHeight) {
+			return true;
+		}
+		const dw = this.scale.displaySize.width;
+		const dh = this.scale.displaySize.height;
+		return dh > dw * 1.02;
+	}
+
 	private applyTouchRespawnAtCurrentLayout(): void {
 		if (
 			!this.player?.sprite?.body ||
@@ -1273,6 +1325,9 @@ export class Play extends Scene {
 			return;
 		}
 		this.scale.refresh();
+		if (this.touchDeathSpawnLayoutDeferred()) {
+			return;
+		}
 		this.touchControls.relayout();
 		this.relayoutTouchChromeHud();
 		const spawn = this.resolveTouchSpawnPlacement();

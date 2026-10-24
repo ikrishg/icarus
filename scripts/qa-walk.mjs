@@ -2959,6 +2959,79 @@ async function runTouchChromeLivesGap(baseUrl) {
 	return { touchChromeLivesGapOk: failures.length === 0, failures };
 }
 
+async function runTouchDeathSpawnStableDuringRise(baseUrl) {
+	const viewports = [
+		{ width: 568, height: 320 },
+		{ width: 640, height: 360 },
+		{ width: 844, height: 390 },
+	];
+	const failures = [];
+	const browser = await chromium.launch();
+	const page = await browser.newPage({
+		viewport: { width: 844, height: 390 },
+		isMobile: true,
+		hasTouch: true,
+	});
+	await bootToPlay(page, baseUrl);
+	for (const vp of viewports) {
+		await page.setViewportSize(vp);
+		await page.waitForTimeout(300);
+		await dispatchBrowserResizeEvents(page);
+		await page.evaluate(() => {
+			window.__icarusPrepareLevel?.(0);
+		});
+		await waitForPlayReady(page, 20000);
+		await page.evaluate(() => {
+			window.__icarusBeginDeathSpawnXTrack?.();
+			window.__icarusGame?.scene.getScene('Play')?.killPlayer('spikes');
+		});
+		await page.waitForFunction(
+			() => {
+				const play = window.__icarusGame?.scene.getScene('Play');
+				return play && !play.isResetting && !play.player?.isDead;
+			},
+			undefined,
+			{ timeout: 40000 },
+		);
+		const detail = await page.evaluate(() => {
+			const samples = window.__icarusEndDeathSpawnXTrack?.() ?? [];
+			const play = window.__icarusGame?.scene.getScene('Play');
+			const want = play?.touchSpawnExpectedAtCurrentLayout?.();
+			if (!want || samples.length < 2) {
+				return {
+					ok: false,
+					reason: 'no-samples',
+					sampleCount: samples.length,
+				};
+			}
+			let maxDev = 0;
+			let worstX = 0;
+			for (const x of samples) {
+				const dev = Math.abs(x - want.x);
+				if (dev > maxDev) {
+					maxDev = dev;
+					worstX = x;
+				}
+			}
+			return {
+				ok: maxDev <= 2,
+				maxDev,
+				wantX: want.x,
+				worstX,
+				sampleCount: samples.length,
+			};
+		});
+		if (!detail.ok) {
+			failures.push({ viewport: vp, ...detail });
+		}
+	}
+	await browser.close();
+	return {
+		touchDeathSpawnStableDuringRiseOk: failures.length === 0,
+		failures,
+	};
+}
+
 async function runDeathRotateTouchSpawnProbeMatrix(baseUrl) {
 	const levelIndices = [0, 1, 2, 5, 7, 11, 13];
 	const viewports = [
@@ -3668,7 +3741,7 @@ async function runPortraitUnfreezeCases(baseUrl) {
 		const play = window.__icarusGame?.scene.getScene('Play');
 		const start = play.levelManager.current.start;
 		const y = start.y;
-		play.player.sprite.setPosition(920, y);
+		play.player.sprite.setPosition(500, y);
 		const body = play.player.sprite.body;
 		body.updateFromGameObject();
 	});
@@ -4318,6 +4391,17 @@ async function main() {
 		console.log(JSON.stringify({ deathRotateTouchSpawnProbe }, null, 2));
 		process.exit(deathRotateTouchSpawnProbe.deathRotateTouchSpawnProbeOk ? 0 : 1);
 	}
+	if (process.env.QA_DEATH_SPAWN_RISE === '1') {
+		const touchDeathSpawnStableDuringRise =
+			await runTouchDeathSpawnStableDuringRise(baseUrl);
+		server.close();
+		console.log(JSON.stringify({ touchDeathSpawnStableDuringRise }, null, 2));
+		process.exit(
+			touchDeathSpawnStableDuringRise.touchDeathSpawnStableDuringRiseOk
+				? 0
+				: 1,
+		);
+	}
 	const pause = await runPauseEscToggle(baseUrl);
 	const desktop = await runDesktop(baseUrl);
 	const debug = await runDebugCheat(baseUrl);
@@ -4353,6 +4437,8 @@ async function main() {
 	}
 	const resizeProgressHold = await runResizeProgressHold(baseUrl);
 	const touchChromeLivesGap = await runTouchChromeLivesGap(baseUrl);
+	const touchDeathSpawnStableDuringRise =
+		await runTouchDeathSpawnStableDuringRise(baseUrl);
 	const deathRotateTouchSpawnProbe =
 		await runDeathRotateTouchSpawnProbeMatrix(baseUrl);
 	const portraitDeathLandscapeSpawn =
@@ -4413,6 +4499,7 @@ async function main() {
 		wallDashThrottled.wallDashBoundsThrottledOk &&
 		resizeProgressHold.resizeProgressHoldOk &&
 		touchChromeLivesGap.touchChromeLivesGapOk &&
+		touchDeathSpawnStableDuringRise.touchDeathSpawnStableDuringRiseOk &&
 		deathRotateTouchSpawnProbe.deathRotateTouchSpawnProbeOk &&
 		portraitDeathLandscapeSpawn.portraitDeathLandscapeSpawnOk &&
 		touchArrowSlide.touchArrowSlideOk &&
@@ -4478,6 +4565,7 @@ async function main() {
 				wallDashThrottled,
 				resizeProgressHold,
 				touchChromeLivesGap,
+				touchDeathSpawnStableDuringRise,
 				deathRotateTouchSpawnProbe,
 				portraitDeathLandscapeSpawn,
 				touchArrowSlide,
