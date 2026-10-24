@@ -140,6 +140,7 @@ export class Play extends Scene {
 	/** Death respawn still needs landscape touch spawn (not cached at death/onRebuild). */
 	private pendingTouchDeathRespawn = false;
 	private portraitMediaActive = false;
+	private lastWindowAspectPortrait = false;
 	private runEndedOnDeath = false;
 	private resizePushGeneration = 0;
 	private resizePushTimer?: Phaser.Time.TimerEvent;
@@ -292,6 +293,7 @@ export class Play extends Scene {
 				}
 			});
 			this.portraitMediaActive = isPortraitBlockerActive();
+			this.lastWindowAspectPortrait = this.windowAspectIsPortrait();
 			this.syncPortraitBlockerPause();
 		}
 
@@ -347,6 +349,19 @@ export class Play extends Scene {
 			this.player?.sprite
 		) {
 			deathSpawnTrack.samples.push(this.player.sprite.x);
+		}
+		if (isTouchDevice(this) && this.touchControls?.visible) {
+			const aspectPortrait = this.windowAspectIsPortrait();
+			if (
+				this.pendingTouchDeathRespawn &&
+				this.lastWindowAspectPortrait &&
+				!aspectPortrait &&
+				this.player &&
+				!this.player.isDead
+			) {
+				this.applyTouchRespawnAtCurrentLayout();
+			}
+			this.lastWindowAspectPortrait = aspectPortrait;
 		}
 		if (isTouchDevice(this)) {
 			if (
@@ -494,11 +509,7 @@ export class Play extends Scene {
 					this.player.controlsEnabled = true;
 				}
 				if (this.pendingTouchDeathRespawn) {
-					if (!this.touchDeathSpawnLayoutDeferred()) {
-						this.applyTouchRespawnAtCurrentLayout();
-					} else {
-						this.pendingTouchLandscapeSpawn = true;
-					}
+					this.applyTouchRespawnAtCurrentLayout();
 				}
 				finishDeath();
 			},
@@ -524,13 +535,13 @@ export class Play extends Scene {
 			isTouchDevice(this) &&
 			this.touchControls?.visible
 		) {
+			this.scale.refresh();
 			if (this.touchDeathSpawnLayoutDeferred()) {
 				this.pendingTouchDeathRespawn = true;
 				const start = this.levelManager.current.start;
 				spawnPos = { x: start.x, y: start.y };
 			} else {
 				this.pendingTouchDeathRespawn = false;
-				this.scale.refresh();
 				spawnPos = this.resolveTouchSpawnPlacement();
 			}
 		} else {
@@ -1066,16 +1077,21 @@ export class Play extends Scene {
 	};
 
 	handleDisplayResize(): void {
+		this.scale.refresh();
 		const wasPortraitMedia = this.portraitMediaActive;
+		const wasAspectPortrait = this.lastWindowAspectPortrait;
 		const portraitMedia = isPortraitBlockerActive();
+		const aspectPortrait = this.windowAspectIsPortrait();
 		this.portraitMediaActive = portraitMedia;
+		this.lastWindowAspectPortrait = aspectPortrait;
 		this.touchControls?.relayout();
 		this.relayoutTouchChromeHud();
 		this.relayoutLevelInstructionIfVisible();
 		const leavingPortrait =
 			this.touchControls?.visible &&
-			wasPortraitMedia &&
-			!portraitMedia;
+			(wasPortraitMedia || wasAspectPortrait) &&
+			!portraitMedia &&
+			!aspectPortrait;
 		if (leavingPortrait) {
 			this.pendingTouchLandscapeSpawn = true;
 		}
@@ -1285,18 +1301,19 @@ export class Play extends Scene {
 				this.player.controlsEnabled = true;
 			}
 		}
-		if (
-			!isPortraitBlockerActive() &&
-			this.pendingTouchDeathRespawn &&
-			this.player &&
-			!this.player.isDead
-		) {
+		if (this.pendingTouchDeathRespawn && this.player && !this.player.isDead) {
 			this.applyTouchRespawnAtCurrentLayout();
 		}
 		this.syncTouchLandscapeSpawnIfNeeded();
 	}
 
-	/** Apply touch spawn for a death respawn using the current (landscape) layout. */
+	private windowAspectIsPortrait(): boolean {
+		if (typeof window === 'undefined' || !window.matchMedia) {
+			return false;
+		}
+		return window.matchMedia('(orientation: portrait)').matches;
+	}
+
 	/** Portrait blocker or stale portrait-shaped Phaser displaySize on landscape window. */
 	private touchDeathSpawnLayoutDeferred(): boolean {
 		if (!isTouchDevice(this) || !this.touchControls?.visible) {
@@ -1305,16 +1322,18 @@ export class Play extends Scene {
 		if (isPortraitBlockerActive()) {
 			return true;
 		}
+		if (this.windowAspectIsPortrait()) {
+			return true;
+		}
 		if (typeof window === 'undefined') {
 			return false;
-		}
-		if (window.innerWidth < window.innerHeight) {
-			return true;
 		}
 		const dw = this.scale.displaySize.width;
 		const dh = this.scale.displaySize.height;
 		return dh > dw * 1.02;
 	}
+
+	/** Apply touch spawn for a death respawn using the current (landscape) layout. */
 
 	private applyTouchRespawnAtCurrentLayout(): void {
 		if (
