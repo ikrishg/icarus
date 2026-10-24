@@ -498,8 +498,7 @@ export class Play extends Scene {
 		const deferTouchSpawn =
 			this.isResetting &&
 			isTouchDevice(this) &&
-			Boolean(this.touchControls?.visible) &&
-			isPortraitBlockerActive();
+			Boolean(this.touchControls?.visible);
 		let spawnPos: { x: number; y: number };
 		if (deferTouchSpawn) {
 			this.pendingTouchDeathRespawn = true;
@@ -507,9 +506,6 @@ export class Play extends Scene {
 			spawnPos = { x: start.x, y: start.y };
 		} else {
 			spawnPos = this.resolveTouchSpawnPlacement();
-			if (this.isResetting && this.touchControls?.visible) {
-				this.pendingTouchDeathRespawn = false;
-			}
 		}
 		this.player.revive(spawnPos.x, spawnPos.y);
 		this.setupLevelColliders();
@@ -1276,6 +1272,7 @@ export class Play extends Scene {
 		) {
 			return;
 		}
+		this.scale.refresh();
 		this.touchControls.relayout();
 		this.relayoutTouchChromeHud();
 		const spawn = this.resolveTouchSpawnPlacement();

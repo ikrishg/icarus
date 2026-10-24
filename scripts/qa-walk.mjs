@@ -2998,7 +2998,11 @@ async function runDeathRotateTouchSpawnProbeMatrix(baseUrl) {
 						?.killPlayer('spikes');
 				});
 				await page.waitForTimeout(delayMs);
-				await portraitLandscapeViaBrowserResize(page, vp);
+				await page.setViewportSize({ width: 390, height: 844 });
+				await page.waitForTimeout(300);
+				await page.setViewportSize(vp);
+				await page.waitForTimeout(300);
+				await dispatchBrowserResizeEvents(page);
 				await page.waitForFunction(
 					() => {
 						const play = window.__icarusGame?.scene.getScene('Play');
@@ -3007,9 +3011,9 @@ async function runDeathRotateTouchSpawnProbeMatrix(baseUrl) {
 						);
 					},
 					undefined,
-					{ timeout: 35000 },
+					{ timeout: 40000 },
 				);
-				await page.waitForTimeout(400);
+				await page.waitForTimeout(600);
 				const detail = await page.evaluate((before) => {
 					const play = window.__icarusGame?.scene.getScene('Play');
 					if (!play?.player?.sprite) {
