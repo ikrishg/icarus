@@ -112,9 +112,9 @@ export class LevelManager {
 
 		const level = this.current;
 		const play = this.scene.scene.get('Play') as
-			| { isResetting?: boolean }
+			| { isResetting?: boolean; suppressFireballClockCommit?: boolean }
 			| undefined;
-		if (play?.isResetting) {
+		if (play?.isResetting || play?.suppressFireballClockCommit) {
 			this.deferLevelClockReset = true;
 		} else {
 			this.deferLevelClockReset = false;

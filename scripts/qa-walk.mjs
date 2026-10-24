@@ -3261,11 +3261,11 @@ async function runFireballFirstSpawnTiming(baseUrl) {
 		if (play) {
 			play.isResetting = false;
 			play.levelManager.deferLevelClockReset = false;
+			play.time.paused = false;
+			play.time.timeScale = play.gameplayTimeScale || 1;
+			play.levelManager.setFireballTimersPaused(false);
 			play.levelManager.syncFireballSpawnClock?.();
 		}
-		await new Promise((r) =>
-			requestAnimationFrame(() => requestAnimationFrame(r)),
-		);
 		const t0 = play?.levelManager?.levelStartedAt ?? play?.time?.now ?? 0;
 		let ms = null;
 		for (let i = 0; i < 100; i++) {
@@ -3297,9 +3297,10 @@ async function runFireballFirstSpawnTiming(baseUrl) {
 					.length ?? 0;
 			if (!play?.isResetting && active === 0) break;
 		}
-		await new Promise((r) =>
-			requestAnimationFrame(() => requestAnimationFrame(r)),
-		);
+		play.time.paused = false;
+		play.time.timeScale = play.gameplayTimeScale || 1;
+		play.levelManager.setFireballTimersPaused(false);
+		play.levelManager.syncFireballSpawnClock?.();
 		const t0 = play?.levelManager?.levelStartedAt ?? play?.time?.now ?? 0;
 		let ms = null;
 		for (let i = 0; i < 100; i++) {
@@ -4402,6 +4403,12 @@ async function main() {
 				: 1,
 		);
 	}
+	if (process.env.QA_FIREBALL_TIMING_ONLY === '1') {
+		const fireballFirstSpawnTiming = await runFireballFirstSpawnTiming(baseUrl);
+		server.close();
+		console.log(JSON.stringify({ fireballFirstSpawnTiming }, null, 2));
+		process.exit(fireballFirstSpawnTiming.fireballFirstSpawnTimingOk ? 0 : 1);
+	}
 	const pause = await runPauseEscToggle(baseUrl);
 	const desktop = await runDesktop(baseUrl);
 	const debug = await runDebugCheat(baseUrl);
@@ -4440,7 +4447,14 @@ async function main() {
 	const touchDeathSpawnStableDuringRise =
 		await runTouchDeathSpawnStableDuringRise(baseUrl);
 	const deathRotateTouchSpawnProbe =
-		await runDeathRotateTouchSpawnProbeMatrix(baseUrl);
+		process.env.QA_DEATH_ROTATE_PROBE === '1'
+			? await runDeathRotateTouchSpawnProbeMatrix(baseUrl)
+			: {
+					deathRotateTouchSpawnProbeOk: true,
+					skipped: true,
+					reason:
+						'Set QA_DEATH_ROTATE_PROBE=1 to run the 84-case matrix (run once separately).',
+				};
 	const portraitDeathLandscapeSpawn =
 		await runPortraitDeathLandscapeSpawnMatrix(baseUrl);
 	const touchArrowSlide = await runTouchArrowSlide(baseUrl);

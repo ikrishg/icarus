@@ -144,6 +144,8 @@ export class Play extends Scene {
 	private runEndedOnDeath = false;
 	private resizePushGeneration = 0;
 	private resizePushTimer?: Phaser.Time.TimerEvent;
+	/** QA prepareLevel: defer fireball timers until touch spawn layout settles. */
+	suppressFireballClockCommit = false;
 
 	constructor() {
 		super('Play');
@@ -242,16 +244,29 @@ export class Play extends Scene {
 						this.pendingTouchDeathRespawn = false;
 						this.player.isDead = false;
 						this.player.controlsEnabled = true;
+						this.suppressFireballClockCommit = true;
 						this.levelManager.goto(levelIndex);
+						this.levelManager.setFireballTimersPaused(true);
 						this.refreshTouchSpawnLayout();
 						world.resume();
 						const spawn = this.resolveTouchSpawnPlacement();
 						this.player.revive(spawn.x, spawn.y);
 						this.setupLevelColliders();
-						this.levelManager.syncFireballSpawnClock();
 						if (this.touchControls?.visible) {
 							this.repositionTouchSpawnIfOverlappingButtons();
 						}
+						this.portraitBlockerPauseActive = false;
+						this.isPaused = false;
+						this.time.paused = false;
+						this.time.timeScale = this.gameplayTimeScale || 1;
+						this.tweens.resumeAll();
+						if (this.physics.world.isPaused) {
+							this.physics.world.resume();
+						}
+						this.suppressFireballClockCommit = false;
+						this.levelManager.syncFireballSpawnClock();
+						this.levelManager.setFireballTimersPaused(false);
+						this.syncPortraitBlockerPause();
 						return true;
 					} finally {
 						if (wasPaused) {
