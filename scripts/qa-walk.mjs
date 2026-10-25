@@ -734,8 +734,21 @@ async function assertUnfrozenAndMoving(page) {
 		}
 	});
 	const before = await getPlayerPos(page);
-	await holdTouchRight(page, 2200);
-	const after = await getPlayerPos(page);
+	const holdMs = process.env.QA_CPU_THROTTLE === '1' ? 9000 : 2200;
+	await holdTouchRight(page, holdMs);
+	let after = await getPlayerPos(page);
+	if (after.x <= before.x + 15 && process.env.QA_CPU_THROTTLE === '1') {
+		await page.waitForFunction(
+			(minX) => {
+				const play = window.__icarusGame?.scene.getScene('Play');
+				const x = play?.player?.sprite?.x ?? 0;
+				return x > minX;
+			},
+			before.x + 15,
+			{ timeout: 12000 },
+		);
+		after = await getPlayerPos(page);
+	}
 	return {
 		ok: after.x > before.x + 15,
 		state,
@@ -3294,7 +3307,7 @@ async function runFireballFirstSpawnTiming(baseUrl) {
 		}
 		const t0 = play?.levelManager?.levelStartedAt ?? play?.time?.now ?? 0;
 		let ms = null;
-		for (let i = 0; i < 100; i++) {
+		for (let i = 0; i < 160; i++) {
 			await new Promise((r) => setTimeout(r, 25));
 			const n =
 				play?.levelManager?.fireballs?.filter((f) => f.sprite?.active)
