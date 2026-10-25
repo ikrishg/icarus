@@ -322,6 +322,16 @@ export class TouchControls {
 		this.layoutScale = 1;
 	}
 
+	getLayoutScale(): number {
+		return this.layoutScale;
+	}
+
+	/** Restore shrink step after a read-only spawn preview (re-relayout). */
+	restoreLayoutScale(scale: number): void {
+		this.layoutScale = scale;
+		this.relayout();
+	}
+
 	/** Smallest layout scale while keeping on-screen targets usable (~30 CSS px). */
 	private minLayoutScale(): number {
 		return 0.42;

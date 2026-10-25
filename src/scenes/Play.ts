@@ -146,6 +146,11 @@ export class Play extends Scene {
 	private resizePushTimer?: Phaser.Time.TimerEvent;
 	/** QA prepareLevel: defer fireball timers until touch spawn layout settles. */
 	suppressFireballClockCommit = false;
+	private touchSpawnLayoutEpoch = 0;
+	private touchSpawnLayoutEpochDone = 0;
+	private touchSpawnSettledAtFrame = 0;
+	private lastTouchSpawnPlacement: { x: number; y: number } | null = null;
+
 	constructor() {
 		super('Play');
 	}
@@ -228,8 +233,23 @@ export class Play extends Scene {
 				}
 				return track?.samples ?? [];
 			};
-			window.__icarusApplyTouchSpawnExpectation = () => {
-				this.applyTouchSpawnAtCurrentLayoutExpectation();
+			window.__icarusIsTouchSpawnLayoutSettled = () =>
+				this.isTouchSpawnLayoutSettled();
+			window.__icarusTouchSpawnDiagnostics = () => {
+				const sprite = this.player?.sprite;
+				const want = this.touchSpawnExpectedAtCurrentLayout();
+				return {
+					settled: this.isTouchSpawnLayoutSettled(),
+					epoch: this.touchSpawnLayoutEpoch,
+					epochDone: this.touchSpawnLayoutEpochDone,
+					framesSinceResizeSettle:
+						this.game.loop.frame - this.touchSpawnSettledAtFrame,
+					spawnX: sprite?.x ?? null,
+					spawnY: sprite?.y ?? null,
+					wantX: want.x,
+					wantY: want.y,
+					layoutScale: this.touchControls?.getLayoutScale?.() ?? null,
+				};
 			};
 			window.__icarusPrepareLevel = (levelIndex: number) => {
 				try {
@@ -241,6 +261,7 @@ export class Play extends Scene {
 					try {
 						this.clearLevelInstruction();
 						this.clearColliders();
+						this.lastTouchSpawnPlacement = null;
 						this.isResetting = false;
 						this.pendingTouchLandscapeSpawn = false;
 						this.pendingTouchDeathRespawn = false;
@@ -477,6 +498,8 @@ export class Play extends Scene {
 		this.clearLevelInstruction();
 		this.setGameplayHudVisible(false);
 		this.isResetting = true;
+		this.resizePushTimer?.remove(false);
+		this.resizePushGeneration++;
 		this.levelManager.setFireballTimersPaused(true);
 		this.time.paused = false;
 		this.time.timeScale = this.gameplayTimeScale || 1;
@@ -577,6 +600,12 @@ export class Play extends Scene {
 		if (this.isResetting) {
 			this.levelManager.setFireballTimersPaused(true);
 		}
+		this.touchSpawnLayoutEpoch++;
+		if (!this.pendingTouchDeathRespawn) {
+			this.syncPlayerToTouchSpawnAtCurrentLayout();
+		}
+		this.touchSpawnLayoutEpochDone = this.touchSpawnLayoutEpoch;
+		this.touchSpawnSettledAtFrame = this.game.loop.frame;
 	}
 
 	clearLevelInstruction() {
@@ -948,23 +977,14 @@ export class Play extends Scene {
 		return { x: start.x, y: start.y };
 	}
 
-	private computeTouchSpawnCoords(refreshLayout: boolean): { x: number; y: number } {
+	isTouchSpawnLayoutSettled(): boolean {
+		return this.touchSpawnLayoutEpochDone === this.touchSpawnLayoutEpoch;
+	}
+
+	private touchSpawnCoordsAtCurrentLayoutScale(): { x: number; y: number } {
 		const start = this.levelManager.current.start;
 		if (!this.touchControls?.visible || !this.player?.sprite?.body) {
 			return { x: start.x, y: start.y };
-		}
-		if (refreshLayout) {
-			this.refreshTouchSpawnLayout();
-		}
-		for (let attempt = 0; attempt < 36; attempt++) {
-			const pos = this.pickTouchSpawnAtCurrentLayout();
-			if (pos) {
-				return this.finalizeTouchSpawnCoords(pos);
-			}
-			if (!this.touchControls.shrinkLayoutStep()) {
-				break;
-			}
-			this.touchControls.relayout();
 		}
 		const pos =
 			this.pickTouchSpawnAtCurrentLayout() ??
@@ -972,14 +992,63 @@ export class Play extends Scene {
 		return this.finalizeTouchSpawnCoords(pos);
 	}
 
-	resolveTouchSpawnPlacement(refreshLayout = true): { x: number; y: number } {
-		const out = this.computeTouchSpawnCoords(refreshLayout);
+	private ensureTouchSpawnLayoutFits(): void {
 		if (!this.touchControls?.visible || !this.player?.sprite?.body) {
-			return out;
+			return;
 		}
+		for (let attempt = 0; attempt < 36; attempt++) {
+			if (this.pickTouchSpawnAtCurrentLayout()) {
+				return;
+			}
+			if (!this.touchControls.shrinkLayoutStep()) {
+				break;
+			}
+			this.touchControls.relayout();
+		}
+	}
+
+	private syncPlayerToTouchSpawnAtCurrentLayout(): void {
+		if (
+			!this.touchControls?.visible ||
+			!this.player?.sprite?.body ||
+			this.player.isDead
+		) {
+			return;
+		}
+		if (
+			this.playerAwayFromTouchSpawnBand() ||
+			this.touchResizePreservesPlayerProgress()
+		) {
+			return;
+		}
+		this.resizePushTimer?.remove(false);
+		this.resizePushGeneration++;
+		this.resolveTouchSpawnPlacement(false);
+	}
+
+	private resetPlayerToLevelStartForSpawnPick(): void {
+		const start = this.levelManager.current.start;
+		const sprite = this.player!.sprite;
+		sprite.setPosition(start.x, start.y);
+		const body = sprite.body as Phaser.Physics.Arcade.Body;
+		body.updateFromGameObject();
+	}
+
+	resolveTouchSpawnPlacement(refreshLayout = true): { x: number; y: number } {
+		const start = this.levelManager.current.start;
+		if (!this.touchControls?.visible || !this.player?.sprite?.body) {
+			return { x: start.x, y: start.y };
+		}
+		if (refreshLayout) {
+			this.refreshTouchSpawnLayout();
+		}
+		this.resetPlayerToLevelStartForSpawnPick();
+		this.ensureTouchSpawnLayoutFits();
+		const out = this.touchSpawnCoordsAtCurrentLayoutScale();
 		this.player.sprite.setPosition(out.x, out.y);
 		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
 		body.updateFromGameObject();
+		this.lastTouchSpawnPlacement = out;
 		return out;
 	}
 
@@ -1035,11 +1104,23 @@ export class Play extends Scene {
 		if (!isTouchDevice(this)) {
 			return { x: start.x, y: start.y };
 		}
-		return this.computeTouchSpawnCoords(false);
+		const sprite = this.player.sprite;
+		const prev = { x: sprite.x, y: sprite.y };
+		this.resetPlayerToLevelStartForSpawnPick();
+		try {
+			return this.touchSpawnCoordsAtCurrentLayoutScale();
+		} finally {
+			sprite.setPosition(prev.x, prev.y);
+			const body = sprite.body as Phaser.Physics.Arcade.Body;
+			body.updateFromGameObject();
+		}
 	}
 
 	/** Expected spawn at current touch layout (matches resolveTouchSpawnPlacement). */
 	touchSpawnPosition(): { x: number; y: number } {
+		if (this.lastTouchSpawnPlacement) {
+			return { ...this.lastTouchSpawnPlacement };
+		}
 		return this.touchSpawnExpectedAtCurrentLayout();
 	}
 
@@ -1100,6 +1181,7 @@ export class Play extends Scene {
 	};
 
 	handleDisplayResize(): void {
+		this.touchSpawnLayoutEpoch++;
 		this.scale.refresh();
 		const wasPortraitMedia = this.portraitMediaActive;
 		const wasAspectPortrait = this.lastWindowAspectPortrait;
@@ -1139,24 +1221,11 @@ export class Play extends Scene {
 			this.syncTouchLandscapeSpawnIfNeeded();
 		}
 		if (!this.isResetting && !this.player?.isDead) {
-			if (
-				!this.playerAwayFromTouchSpawnBand() &&
-				!this.touchResizePreservesPlayerProgress()
-			) {
-				this.applyTouchSpawnAtCurrentLayoutExpectation();
-			}
+			this.syncPlayerToTouchSpawnAtCurrentLayout();
 			this.schedulePushClearOfTouchButtons();
 		}
-	}
-
-	private applyTouchSpawnAtCurrentLayoutExpectation(): void {
-		if (!this.touchControls?.visible || !this.player?.sprite?.body) {
-			return;
-		}
-		const pos = this.computeTouchSpawnCoords(false);
-		this.player.sprite.setPosition(pos.x, pos.y);
-		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
-		body.updateFromGameObject();
+		this.touchSpawnLayoutEpochDone = this.touchSpawnLayoutEpoch;
+		this.touchSpawnSettledAtFrame = this.game.loop.frame;
 	}
 
 	private touchResizePreservesPlayerProgress(): boolean {
@@ -1170,8 +1239,17 @@ export class Play extends Scene {
 		if (!this.player?.sprite || !this.touchControls?.visible) {
 			return false;
 		}
-		const want = this.touchSpawnExpectedAtCurrentLayout();
-		return Math.abs(this.player.sprite.x - want.x) > 12;
+		const start = this.levelManager.current.start;
+		const sprite = this.player.sprite;
+		const sprB = sprite.getBounds();
+		const spriteHalfW = (sprB.right - sprB.left) / 2;
+		const clusterMin = this.touchControls.getMinSpawnX(spriteHalfW);
+		const maxDelta = Math.max(
+			72,
+			clusterMin - start.x,
+			clusterMin + 72 - start.x,
+		);
+		return sprite.x > start.x + maxDelta + 12;
 	}
 
 	private playerOverlapsTouchGameplayButtons(): boolean {
@@ -1221,6 +1299,9 @@ export class Play extends Scene {
 	}
 
 	private schedulePushClearOfTouchButtons(): void {
+		if (!this.playerOverlapsTouchGameplayButtons()) {
+			return;
+		}
 		const generation = ++this.resizePushGeneration;
 		this.resizePushTimer?.remove(false);
 		this.resizePushTimer = this.time.delayedCall(280, () => {
@@ -1404,12 +1485,12 @@ export class Play extends Scene {
 		}
 		this.touchControls.relayout();
 		this.relayoutTouchChromeHud();
-		const spawn = this.computeTouchSpawnCoords(false);
-		this.player.setPosition(spawn.x, spawn.y);
-		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
-		body.updateFromGameObject();
+		this.resolveTouchSpawnPlacement(false);
 		this.pendingTouchDeathRespawn = false;
 		this.pendingTouchLandscapeSpawn = false;
+		this.touchSpawnLayoutEpoch++;
+		this.touchSpawnLayoutEpochDone = this.touchSpawnLayoutEpoch;
+		this.touchSpawnSettledAtFrame = this.game.loop.frame;
 	}
 
 	/** QA / portrait return: snap player to touch spawn when layout changed. */

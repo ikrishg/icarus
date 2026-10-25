@@ -1541,9 +1541,18 @@ function hazardXsInWindow(level, minX, maxX) {
 	return hits;
 }
 
+async function waitTouchSpawnLayoutSettled(page, timeoutMs = 10000) {
+	await page.waitForFunction(
+		() => window.__icarusIsTouchSpawnLayoutSettled?.() === true,
+		undefined,
+		{ timeout: timeoutMs },
+	);
+}
+
 async function runTouchSpawnSafety(baseUrl) {
 	const viewports = TOUCH_SPAWN_VIEWPORTS;
 	const failures = [];
+	const diag = process.env.QA_TOUCH_SPAWN_DIAG === '1';
 	const browser = await chromium.launch();
 	for (const vp of viewports) {
 		const page = await browser.newPage({
@@ -1555,11 +1564,30 @@ async function runTouchSpawnSafety(baseUrl) {
 		for (let level = 0; level < 15; level++) {
 			await page.evaluate((idx) => {
 				window.__icarusPrepareLevel?.(idx);
-				const play = window.__icarusGame?.scene.getScene('Play');
-				play?.handleDisplayResize?.();
-				window.__icarusApplyTouchSpawnExpectation?.();
+				window.__icarusGame?.scene.getScene('Play')?.handleDisplayResize?.();
 			}, level);
+			await waitTouchSpawnLayoutSettled(page);
 			for (const phase of ['spawn-check', 'death-respawn']) {
+			if (phase === 'death-respawn') {
+				await page.evaluate(() => {
+					window.__icarusGame?.scene
+						.getScene('Play')
+						?.killPlayer?.('fall', { fast: true, spendLife: false });
+				});
+				await page.waitForFunction(
+					() => {
+						const play = window.__icarusGame?.scene.getScene('Play');
+						return (
+							play &&
+							!play.isResetting &&
+							!play.player?.isDead &&
+							window.__icarusIsTouchSpawnLayoutSettled?.() === true
+						);
+					},
+					undefined,
+					{ timeout: 12000 },
+				);
+			}
 			const result = await page.evaluate(async ({ idx, phase, vpWidth, spawnPad }) => {
 				const spriteOverlapsButtons = (playerRect, buttons) =>
 					buttons.some(
@@ -1571,23 +1599,6 @@ async function runTouchSpawnSafety(baseUrl) {
 					);
 				const play = window.__icarusGame?.scene.getScene('Play');
 				if (!play?.touchControls?.visible) return { ok: true };
-				const playScene = window.__icarusGame?.scene.getScene('Play');
-				if (phase === 'death-respawn') {
-					playScene?.killPlayer?.('fall', { fast: true, spendLife: false });
-					for (let t = 0; t < 120; t++) {
-						await new Promise((r) => setTimeout(r, 50));
-						if (
-							playScene &&
-							!playScene.isResetting &&
-							!playScene.player?.isDead
-						) {
-							break;
-						}
-					}
-				}
-				await new Promise((r) =>
-					requestAnimationFrame(() => requestAnimationFrame(r)),
-				);
 				const levelDef = play.levelManager.current;
 				const startX = levelDef.start.x;
 				const spawnX = play.player.sprite.x;
@@ -1715,6 +1726,7 @@ async function runTouchSpawnSafety(baseUrl) {
 					return best === Infinity ? Infinity : best;
 				})();
 				const hazardMarginOk = hazardMarginPx >= 96;
+				const diag = window.__icarusTouchSpawnDiagnostics?.() ?? null;
 				return {
 					ok:
 						Math.abs(spawnX - want.x) <= spawnTol &&
@@ -1723,6 +1735,9 @@ async function runTouchSpawnSafety(baseUrl) {
 						spawnX >= boundsMin - 4 &&
 						spawnX >= clusterMin - 4,
 					spawnX,
+					spawnY: play.player.sprite.y,
+					wantX: want.x,
+					wantY: want.y,
 					startX,
 					delta,
 					touchOnlyHazards: touchOnly,
@@ -1730,9 +1745,18 @@ async function runTouchSpawnSafety(baseUrl) {
 					overlapsButtons,
 					feasible,
 					phase,
+					diag,
 				};
 			}, { idx: level, phase, vpWidth: vp.width, spawnPad: TOUCH_SPAWN_PAD });
-			if (!result.ok) failures.push({ viewport: vp, level: level + 1, ...result });
+			if (!result.ok) {
+				const row = { viewport: vp, level: level + 1, ...result };
+				failures.push(row);
+				if (diag) {
+					console.log(
+						JSON.stringify({ touchSpawnFail: row }, null, 2),
+					);
+				}
+			}
 			}
 		}
 		await page.close();
