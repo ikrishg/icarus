@@ -24,8 +24,14 @@ export class LevelManager {
 	fireballTimers: Phaser.Time.TimerEvent[] = [];
 	lavaTimers: Phaser.Time.TimerEvent[] = [];
 	levelStartedAt = 0;
+	/** Ms from levelStartedAt to first fireball spawn this level (QA / timing). */
+	firstFireballSpawnOffsetMs: number | null = null;
 	/** When true, Play resets levelStartedAt when death reset finishes. */
 	deferLevelClockReset = false;
+
+	getFirstFireballSpawnOffsetMs(): number | null {
+		return this.firstFireballSpawnOffsetMs;
+	}
 	private hudObjects: Phaser.GameObjects.GameObject[] = [];
 
 	getHudTitle(): Phaser.GameObjects.Text | undefined {
@@ -313,6 +319,7 @@ export class LevelManager {
 
 	private commitFireballSpawnSchedule(): void {
 		this.levelStartedAt = this.scene.time.now;
+		this.firstFireballSpawnOffsetMs = null;
 		for (const o of this.current.obstacles) {
 			if (o.type === 'fireball') {
 				this.addFireballTimer(o);
@@ -345,17 +352,27 @@ export class LevelManager {
 		const interval = o.interval || 2000;
 
 		const spawnFireball = () => {
+			if (this.firstFireballSpawnOffsetMs === null) {
+				this.firstFireballSpawnOffsetMs =
+					this.scene.time.now - this.levelStartedAt;
+			}
 			const fireball = new Fireball(this.scene, o.x, o.y);
 			this.fireballs.push(fireball);
 			this.hazards.add(fireball.sprite);
 			this.fireballs = this.fireballs.filter((fb) => fb.sprite?.active);
 		};
 
+		const once = this.scene.time.delayedCall(delay, spawnFireball);
+		if (this.scene.time.paused) {
+			once.paused = true;
+		}
+		this.fireballTimers.push(once);
+
 		const timer = this.scene.time.addEvent({
 			delay: interval,
 			callback: spawnFireball,
 			loop: true,
-			startAt: Math.max(0, interval - delay),
+			startAt: Math.max(0, delay),
 		});
 		if (this.scene.time.paused) {
 			timer.paused = true;

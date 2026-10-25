@@ -1174,15 +1174,15 @@ function minSpawnCenterFromLeftButtons(leftButtons, pad, spriteHalfW) {
 }
 
 function expectedFireballFirstSpawnMs(delay, interval) {
-	const startAt = Math.max(0, interval - delay);
-	return interval - startAt;
+	const firstLoopAt = Math.max(0, interval - delay);
+	return Math.min(delay, firstLoopAt);
 }
 
 function runTouchLayoutMutationGuards() {
 	const failures = [];
 	const l6Delay = 1000;
 	const l6Interval = 1800;
-	if (expectedFireballFirstSpawnMs(l6Delay, l6Interval) !== 1000) {
+	if (expectedFireballFirstSpawnMs(l6Delay, l6Interval) !== 800) {
 		failures.push('fireball-startAt-formula');
 	}
 	const panel = { left: 100, right: 500, top: 190, bottom: 310 };
@@ -3294,7 +3294,31 @@ async function runFireballFirstSpawnTiming(baseUrl) {
 		hasTouch: true,
 	});
 	await bootToPlay(page, baseUrl);
-	const firstEntry = await page.evaluate(async () => {
+	const firstEntry = await page.evaluate(() => {
+		const waitFirstFireballOffsetMs = (play) =>
+			new Promise((resolve) => {
+				const anchorStartedAt = play.levelManager.levelStartedAt;
+				const onPost = () => {
+					if (play.levelManager.levelStartedAt !== anchorStartedAt) {
+						return;
+					}
+					const off = play.levelManager.getFirstFireballSpawnOffsetMs?.();
+					if (off != null) {
+						play.events.off('postupdate', onPost);
+						resolve(off);
+						return;
+					}
+					if (
+						play.time.now - play.levelManager.levelStartedAt >
+						10000
+					) {
+						play.events.off('postupdate', onPost);
+						resolve(null);
+					}
+				};
+				play.events.on('postupdate', onPost);
+				onPost();
+			});
 		window.__icarusPrepareLevel?.(5);
 		const play = window.__icarusGame?.scene.getScene('Play');
 		if (play) {
@@ -3303,21 +3327,8 @@ async function runFireballFirstSpawnTiming(baseUrl) {
 			play.time.paused = false;
 			play.time.timeScale = play.gameplayTimeScale || 1;
 			play.levelManager.setFireballTimersPaused(false);
-			play.levelManager.syncFireballSpawnClock?.();
 		}
-		const t0 = play?.levelManager?.levelStartedAt ?? play?.time?.now ?? 0;
-		let ms = null;
-		for (let i = 0; i < 160; i++) {
-			await new Promise((r) => setTimeout(r, 25));
-			const n =
-				play?.levelManager?.fireballs?.filter((f) => f.sprite?.active)
-					.length ?? 0;
-			if (n > 0) {
-				ms = (play?.time?.now ?? 0) - t0;
-				break;
-			}
-		}
-		return ms;
+		return waitFirstFireballOffsetMs(play);
 	});
 	await page.evaluate(() => {
 		window.__icarusGame?.scene.getScene('Play')?.killPlayer('fall', {
@@ -3327,35 +3338,56 @@ async function runFireballFirstSpawnTiming(baseUrl) {
 	});
 	await page.waitForTimeout(500);
 	await waitForPlayReady(page, 25000);
-	const afterRespawn = await page.evaluate(async () => {
+	const afterRespawn = await page.evaluate(() => {
+		const waitFirstFireballOffsetMs = (play) =>
+			new Promise((resolve) => {
+				const anchorStartedAt = play.levelManager.levelStartedAt;
+				const onPost = () => {
+					if (play.levelManager.levelStartedAt !== anchorStartedAt) {
+						return;
+					}
+					const off = play.levelManager.getFirstFireballSpawnOffsetMs?.();
+					if (off != null) {
+						play.events.off('postupdate', onPost);
+						resolve(off);
+						return;
+					}
+					if (
+						play.time.now - play.levelManager.levelStartedAt >
+						10000
+					) {
+						play.events.off('postupdate', onPost);
+						resolve(null);
+					}
+				};
+				play.events.on('postupdate', onPost);
+				onPost();
+			});
 		const play = window.__icarusGame?.scene.getScene('Play');
-		for (let i = 0; i < 160; i++) {
-			await new Promise((r) => setTimeout(r, 25));
-			const active =
-				play?.levelManager?.fireballs?.filter((f) => f.sprite?.active)
+		return new Promise((resolve) => {
+			const countActive = () =>
+				play.levelManager?.fireballs?.filter((f) => f.sprite?.active)
 					.length ?? 0;
-			if (!play?.isResetting && active === 0) break;
-		}
-		play.time.paused = false;
-		play.time.timeScale = play.gameplayTimeScale || 1;
-		play.levelManager.setFireballTimersPaused(false);
-		play.levelManager.syncFireballSpawnClock?.();
-		const t0 = play?.levelManager?.levelStartedAt ?? play?.time?.now ?? 0;
-		let ms = null;
-		for (let i = 0; i < 100; i++) {
-			await new Promise((r) => setTimeout(r, 25));
-			const n =
-				play?.levelManager?.fireballs?.filter((f) => f.sprite?.active)
-					.length ?? 0;
-			if (n > 0) {
-				ms = (play?.time?.now ?? 0) - t0;
-				break;
-			}
-		}
-		return ms;
+			const onIdle = () => {
+				if (!play?.isResetting && countActive() === 0) {
+					play.events.off('postupdate', onIdle);
+					play.time.paused = false;
+					play.time.timeScale = play.gameplayTimeScale || 1;
+					play.levelManager.setFireballTimersPaused(false);
+					waitFirstFireballOffsetMs(play).then(resolve);
+					return;
+				}
+				if (play.time.now > 25000) {
+					play.events.off('postupdate', onIdle);
+					resolve(null);
+				}
+			};
+			play.events.on('postupdate', onIdle);
+			onIdle();
+		});
 	});
 	await browser.close();
-	const target = expectedFireballFirstSpawnMs(1000, 1800);
+	const target = expectedFireballFirstSpawnMs(1000, 1800); // 800ms (main schedule)
 	const near = (ms, slack = 100) =>
 		ms != null && ms >= target - slack && ms <= target + slack;
 	return {

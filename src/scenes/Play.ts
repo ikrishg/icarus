@@ -262,6 +262,7 @@ export class Play extends Scene {
 						this.clearLevelInstruction();
 						this.clearColliders();
 						this.lastTouchSpawnPlacement = null;
+						this.levelManager.firstFireballSpawnOffsetMs = null;
 						this.isResetting = false;
 						this.pendingTouchLandscapeSpawn = false;
 						this.pendingTouchDeathRespawn = false;
