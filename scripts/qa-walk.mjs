@@ -3445,7 +3445,9 @@ async function runL15RealKeys(baseUrl) {
 					?.goal;
 			return { x: g?.x ?? 1740, y: g?.y ?? 400 };
 		});
-		const deadline = Date.now() + 180000;
+		const deadline =
+			Date.now() +
+			(process.env.QA_CPU_THROTTLE === '1' ? 360000 : 180000);
 		let lastX = (await getPlayerPos(page)).x;
 		let stuckTicks = 0;
 		let jumpBurst = 0;
