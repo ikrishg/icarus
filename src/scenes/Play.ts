@@ -1239,6 +1239,11 @@ export class Play extends Scene {
 		if (!this.player?.sprite || !this.touchControls?.visible) {
 			return false;
 		}
+		const px = this.player.sprite.x;
+		const placed = this.lastTouchSpawnPlacement;
+		if (placed) {
+			return Math.abs(px - placed.x) > 12;
+		}
 		const start = this.levelManager.current.start;
 		const sprite = this.player.sprite;
 		const sprB = sprite.getBounds();
@@ -1249,7 +1254,7 @@ export class Play extends Scene {
 			clusterMin - start.x,
 			clusterMin + 72 - start.x,
 		);
-		return sprite.x > start.x + maxDelta + 12;
+		return px > start.x + maxDelta + 12;
 	}
 
 	private playerOverlapsTouchGameplayButtons(): boolean {

@@ -3634,6 +3634,7 @@ async function runPortraitUnfreezeCases(baseUrl) {
 		isMobile: true,
 		hasTouch: true,
 	});
+	await applyCpuThrottleIfRequested(page);
 	await bootToPlay(page, baseUrl);
 	await page.locator('canvas').click();
 	await page.evaluate(() => {
@@ -4404,6 +4405,12 @@ async function main() {
 		server.close();
 		console.log(JSON.stringify({ touchSpawn }, null, 2));
 		process.exit(touchSpawn.touchSpawnOk ? 0 : 1);
+	}
+	if (process.env.QA_PORTRAIT_UNFREEZE_ONLY === '1') {
+		const portraitUnfreeze = await runPortraitUnfreezeCases(baseUrl);
+		server.close();
+		console.log(JSON.stringify({ portraitUnfreeze }, null, 2));
+		process.exit(portraitUnfreeze.portraitUnfreezeOk ? 0 : 1);
 	}
 	if (process.env.QA_L15_ONLY === '1') {
 		const l15RealKeys = await runL15RealKeys(baseUrl);
