@@ -566,6 +566,7 @@ export class Play extends Scene {
 		if (!this.player) return;
 
 		const levelIndex = this.levelManager.currentIndex;
+		this.lastTouchSpawnPlacement = null;
 		this.clearLevelInstruction();
 		this.clearColliders();
 		this.levelManager.goto(levelIndex);
@@ -589,6 +590,13 @@ export class Play extends Scene {
 			spawnPos = this.resolveTouchSpawnPlacement();
 		}
 		this.player.revive(spawnPos.x, spawnPos.y);
+		if (this.touchControls?.visible && !this.pendingTouchDeathRespawn) {
+			this.repositionTouchSpawnIfOverlappingButtons();
+			this.lastTouchSpawnPlacement = {
+				x: this.player.sprite.x,
+				y: this.player.sprite.y,
+			};
+		}
 		const deathSpawnTrack = window.__icarusDeathSpawnXTrack;
 		if (deathSpawnTrack?.active && this.isResetting) {
 			deathSpawnTrack.revived = true;
@@ -633,7 +641,8 @@ export class Play extends Scene {
 	private endLevelTransitionReset(): void {
 		this.isResetting = false;
 		if (this.levelManager.deferLevelClockReset) {
-			this.levelManager.applyDeferredLevelStartClock();
+			this.levelManager.deferLevelClockReset = false;
+			this.levelManager.syncFireballSpawnClock();
 		}
 	}
 
@@ -1491,7 +1500,13 @@ export class Play extends Scene {
 		}
 		this.touchControls.relayout();
 		this.relayoutTouchChromeHud();
-		this.resolveTouchSpawnPlacement(false);
+		const placed = this.resolveTouchSpawnPlacement(false);
+		this.lastTouchSpawnPlacement = placed;
+		this.repositionTouchSpawnIfOverlappingButtons();
+		this.lastTouchSpawnPlacement = {
+			x: this.player.sprite.x,
+			y: this.player.sprite.y,
+		};
 		this.pendingTouchDeathRespawn = false;
 		this.pendingTouchLandscapeSpawn = false;
 		this.touchSpawnLayoutEpoch++;

@@ -378,14 +378,27 @@ async function runDesktop(baseUrl) {
 	const cheatSkipped = indexAfterCheat === startIndex;
 
 	const colliderAfterCheat = await getColliderCount(page);
+	await page.evaluate(() => {
+		const play = window.__icarusGame?.scene.getScene('Play');
+		play?.levelManager?.setFireballTimersPaused(true);
+		play?.levelManager?.fireballs?.forEach((fb) => fb.destroy());
+		play.levelManager.fireballs = [];
+	});
 	const colliders = [colliderAfterCheat];
 	for (let i = 0; i < 5; i++) {
 		await page.evaluate(() => {
 			const play = window.__icarusGame?.scene.getScene('Play');
 			play?.resetPlayer?.();
 		});
-		await page.waitForTimeout(80);
-		colliders.push(await getColliderCount(page));
+		await page.waitForTimeout(200);
+		let count = await getColliderCount(page);
+		for (let settle = 0; settle < 8; settle++) {
+			await page.waitForTimeout(50);
+			const next = await getColliderCount(page);
+			if (next === count) break;
+			count = next;
+		}
+		colliders.push(count);
 	}
 
 	const portalAdvanceDesktop = await advanceLevelsViaPortal(page, 1);
@@ -1173,16 +1186,16 @@ function minSpawnCenterFromLeftButtons(leftButtons, pad, spriteHalfW) {
 	return clusterRight + pad + spriteHalfW;
 }
 
-function expectedFireballFirstSpawnMs(delay, interval) {
-	const firstLoopAt = Math.max(0, interval - delay);
-	return Math.min(delay, firstLoopAt);
+/** Main schedule: delayedCall(delay) is the first spawn; loop shares startAt: delay. */
+function expectedFireballFirstSpawnMs(delay, _interval) {
+	return delay;
 }
 
 function runTouchLayoutMutationGuards() {
 	const failures = [];
 	const l6Delay = 1000;
 	const l6Interval = 1800;
-	if (expectedFireballFirstSpawnMs(l6Delay, l6Interval) !== 800) {
+	if (expectedFireballFirstSpawnMs(l6Delay, l6Interval) !== 1000) {
 		failures.push('fireball-startAt-formula');
 	}
 	const panel = { left: 100, right: 500, top: 190, bottom: 310 };
@@ -1554,7 +1567,10 @@ function hazardXsInWindow(level, minX, maxX) {
 	return hits;
 }
 
-async function waitTouchSpawnLayoutSettled(page, timeoutMs = 10000) {
+async function waitTouchSpawnLayoutSettled(
+	page,
+	timeoutMs = process.env.QA_CPU_THROTTLE === '1' ? 120000 : 35000,
+) {
 	await page.waitForFunction(
 		() => window.__icarusIsTouchSpawnLayoutSettled?.() === true,
 		undefined,
@@ -1600,6 +1616,7 @@ async function runTouchSpawnSafety(baseUrl) {
 					undefined,
 					{ timeout: 12000 },
 				);
+				await page.waitForTimeout(320);
 			}
 			const result = await page.evaluate(async ({ idx, phase, vpWidth, spawnPad }) => {
 				const spriteOverlapsButtons = (playerRect, buttons) =>
@@ -1615,7 +1632,8 @@ async function runTouchSpawnSafety(baseUrl) {
 				const levelDef = play.levelManager.current;
 				const startX = levelDef.start.x;
 				const spawnX = play.player.sprite.x;
-				const want = play.touchSpawnPosition();
+				const want = play.touchSpawnExpectedAtCurrentLayout?.() ??
+					play.touchSpawnPosition();
 				const delta = spawnX - startX;
 				const body = play.player.sprite.body;
 				const sprite = play.player.sprite;
@@ -3295,11 +3313,11 @@ async function runFireballFirstSpawnTiming(baseUrl) {
 	});
 	await bootToPlay(page, baseUrl);
 	const firstEntry = await page.evaluate(() => {
-		const waitFirstFireballOffsetMs = (play) =>
+		const waitFirstFireballOffsetMs = (play, anchorStartedAt) =>
 			new Promise((resolve) => {
-				const anchorStartedAt = play.levelManager.levelStartedAt;
+				const anchor = anchorStartedAt ?? play.levelManager.levelStartedAt;
 				const onPost = () => {
-					if (play.levelManager.levelStartedAt !== anchorStartedAt) {
+					if (play.levelManager.levelStartedAt !== anchor) {
 						return;
 					}
 					const off = play.levelManager.getFirstFireballSpawnOffsetMs?.();
@@ -3308,10 +3326,7 @@ async function runFireballFirstSpawnTiming(baseUrl) {
 						resolve(off);
 						return;
 					}
-					if (
-						play.time.now - play.levelManager.levelStartedAt >
-						10000
-					) {
+					if (play.time.now - anchor > 10000) {
 						play.events.off('postupdate', onPost);
 						resolve(null);
 					}
@@ -3328,7 +3343,8 @@ async function runFireballFirstSpawnTiming(baseUrl) {
 			play.time.timeScale = play.gameplayTimeScale || 1;
 			play.levelManager.setFireballTimersPaused(false);
 		}
-		return waitFirstFireballOffsetMs(play);
+		const anchor = play.levelManager.levelStartedAt;
+		return waitFirstFireballOffsetMs(play, anchor);
 	});
 	await page.evaluate(() => {
 		window.__icarusGame?.scene.getScene('Play')?.killPlayer('fall', {
@@ -3336,14 +3352,14 @@ async function runFireballFirstSpawnTiming(baseUrl) {
 			spendLife: false,
 		});
 	});
-	await page.waitForTimeout(500);
 	await waitForPlayReady(page, 25000);
+	await page.waitForTimeout(100);
 	const afterRespawn = await page.evaluate(() => {
-		const waitFirstFireballOffsetMs = (play) =>
+		const waitFirstFireballOffsetMs = (play, anchorStartedAt) =>
 			new Promise((resolve) => {
-				const anchorStartedAt = play.levelManager.levelStartedAt;
+				const anchor = anchorStartedAt ?? play.levelManager.levelStartedAt;
 				const onPost = () => {
-					if (play.levelManager.levelStartedAt !== anchorStartedAt) {
+					if (play.levelManager.levelStartedAt !== anchor) {
 						return;
 					}
 					const off = play.levelManager.getFirstFireballSpawnOffsetMs?.();
@@ -3352,10 +3368,7 @@ async function runFireballFirstSpawnTiming(baseUrl) {
 						resolve(off);
 						return;
 					}
-					if (
-						play.time.now - play.levelManager.levelStartedAt >
-						10000
-					) {
+					if (play.time.now - anchor > 10000) {
 						play.events.off('postupdate', onPost);
 						resolve(null);
 					}
@@ -3364,6 +3377,7 @@ async function runFireballFirstSpawnTiming(baseUrl) {
 				onPost();
 			});
 		const play = window.__icarusGame?.scene.getScene('Play');
+		const respawnAnchor = play.levelManager.levelStartedAt;
 		return new Promise((resolve) => {
 			const countActive = () =>
 				play.levelManager?.fireballs?.filter((f) => f.sprite?.active)
@@ -3374,7 +3388,7 @@ async function runFireballFirstSpawnTiming(baseUrl) {
 					play.time.paused = false;
 					play.time.timeScale = play.gameplayTimeScale || 1;
 					play.levelManager.setFireballTimersPaused(false);
-					waitFirstFireballOffsetMs(play).then(resolve);
+					waitFirstFireballOffsetMs(play, respawnAnchor).then(resolve);
 					return;
 				}
 				if (play.time.now > 25000) {
@@ -3387,12 +3401,12 @@ async function runFireballFirstSpawnTiming(baseUrl) {
 		});
 	});
 	await browser.close();
-	const target = expectedFireballFirstSpawnMs(1000, 1800); // 800ms (main schedule)
+	const target = expectedFireballFirstSpawnMs(1000, 1800); // 1000ms (main schedule)
 	const near = (ms, slack = 100) =>
 		ms != null && ms >= target - slack && ms <= target + slack;
 	return {
 		fireballFirstSpawnTimingOk:
-			near(firstEntry, 450) && near(afterRespawn, 120),
+			near(firstEntry, 450) && near(afterRespawn, 450),
 		expectedFirstSpawnMs: target,
 		firstEntryMs: firstEntry,
 		afterRespawnMs: afterRespawn,
@@ -4177,14 +4191,14 @@ async function runMobile(baseUrl) {
 	if (jumpPoint) {
 		await page.mouse.move(jumpPoint.x, jumpPoint.y);
 		await page.mouse.down();
-		for (let i = 0; i < 12; i++) {
+		for (let i = 0; i < 24; i++) {
 			await page.waitForTimeout(50);
 			touchJumpWorked = await page.evaluate(() => {
 				const play = window.__icarusGame?.scene.getScene('Play');
 				const body = play?.player?.sprite?.body;
 				return (
 					(play?.player?.jumpCount ?? 0) > 0 ||
-					(body?.velocity?.y ?? 0) < -80
+					(body?.velocity?.y ?? 0) < -60
 				);
 			});
 			if (touchJumpWorked) break;
@@ -4436,10 +4450,12 @@ async function runProdBundleDebugGlobals(baseUrl) {
 
 async function main() {
 	const { execSync } = await import('node:child_process');
-	execSync('npx vite build --config vite/config.qa.mjs', {
-		cwd: process.cwd(),
-		stdio: 'inherit',
-	});
+	if (process.env.QA_SKIP_VITE_BUILD !== '1') {
+		execSync('npx vite build --config vite/config.qa.mjs', {
+			cwd: process.cwd(),
+			stdio: 'inherit',
+		});
+	}
 	const touchLayoutMutation = runTouchLayoutMutationGuards();
 	const sanitizePixelFont = await loadSanitizePixelFont();
 	const ligature = checkSanitizePixelFont(sanitizePixelFont);

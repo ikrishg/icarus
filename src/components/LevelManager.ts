@@ -318,6 +318,14 @@ export class LevelManager {
 	}
 
 	private commitFireballSpawnSchedule(): void {
+		this.fireballs.forEach((fb) => {
+			fb.destroy();
+		});
+		this.fireballs = [];
+		this.fireballTimers.forEach((timer) => {
+			timer.remove();
+		});
+		this.fireballTimers = [];
 		this.levelStartedAt = this.scene.time.now;
 		this.firstFireballSpawnOffsetMs = null;
 		for (const o of this.current.obstacles) {
@@ -362,17 +370,16 @@ export class LevelManager {
 			this.fireballs = this.fireballs.filter((fb) => fb.sprite?.active);
 		};
 
-		const once = this.scene.time.delayedCall(delay, spawnFireball);
-		if (this.scene.time.paused) {
-			once.paused = true;
-		}
-		this.fireballTimers.push(once);
+		// Main: delayedCall(delay) + loop startAt delay (same first-fire time).
+		this.fireballTimers.push(
+			this.scene.time.delayedCall(delay, spawnFireball),
+		);
 
 		const timer = this.scene.time.addEvent({
 			delay: interval,
 			callback: spawnFireball,
 			loop: true,
-			startAt: Math.max(0, delay),
+			startAt: delay,
 		});
 		if (this.scene.time.paused) {
 			timer.paused = true;
