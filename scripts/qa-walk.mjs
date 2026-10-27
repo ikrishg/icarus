@@ -7,6 +7,61 @@ import { startStaticServer } from './static-server.mjs';
 
 const ARTIFACT_SCREENSHOTS = '/opt/cursor/artifacts/screenshots';
 
+const trackedBrowsers = new Set();
+let qaWalkHttpServer = null;
+
+async function launchChromium(options = {}) {
+	const userDataDir = process.env.QA_CHROMIUM_USER_DATA_DIR;
+	const launchOptions = { ...options };
+	if (userDataDir) {
+		launchOptions.args = [
+			...(launchOptions.args ?? []),
+			`--user-data-dir=${userDataDir}`,
+		];
+	}
+	const browser = await chromium.launch(launchOptions);
+	trackedBrowsers.add(browser);
+	return browser;
+}
+
+async function closeChromium(browser) {
+	if (!browser) return;
+	trackedBrowsers.delete(browser);
+	try {
+		await browser.close();
+	} catch {
+		// already closed
+	}
+}
+
+async function shutdownQaWalk() {
+	const pending = [...trackedBrowsers];
+	trackedBrowsers.clear();
+	await Promise.all(pending.map((b) => b.close().catch(() => {})));
+	if (qaWalkHttpServer) {
+		try {
+			qaWalkHttpServer.close();
+		} catch {
+			// ignore
+		}
+		qaWalkHttpServer = null;
+	}
+}
+
+async function exitQaWalk(code) {
+	await shutdownQaWalk();
+	process.exit(code);
+}
+
+async function withLaunchedBrowser(run) {
+	const browser = await launchChromium();
+	try {
+		return await run(browser);
+	} finally {
+		await closeChromium(browser);
+	}
+}
+
 const ABOUT_BODY_RAW = `Icarus flies toward the sun on wings of feathers and wax.
 Every few levels the heat takes something. You choose what to give up: feathers, sight, speed, the way home, or your father's bow.
 Four times, the sky gives a little back. Spend it well. Reach the sun.
@@ -83,7 +138,7 @@ function smallestScreenTextPx(game, scene) {
 }
 
 async function runPauseEscToggle(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 	await bootToPlay(page, baseUrl);
 	for (let cycle = 0; cycle < 3; cycle++) {
@@ -94,7 +149,7 @@ async function runPauseEscToggle(baseUrl) {
 			return Boolean(play?.pausePanel);
 		});
 		if (!open) {
-			await browser.close();
+			await closeChromium(browser);
 			return { pauseEscOk: false, failedAt: `open-${cycle}` };
 		}
 		await page.keyboard.press('Escape');
@@ -104,11 +159,11 @@ async function runPauseEscToggle(baseUrl) {
 			return !play?.pausePanel;
 		});
 		if (!closed) {
-			await browser.close();
+			await closeChromium(browser);
 			return { pauseEscOk: false, failedAt: `close-${cycle}` };
 		}
 	}
-	await browser.close();
+	await closeChromium(browser);
 	return { pauseEscOk: true };
 }
 
@@ -333,7 +388,7 @@ async function advanceLevelsViaPortal(page, count) {
 }
 
 async function runDesktop(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 	await bootToPlay(page, baseUrl);
 
@@ -403,7 +458,7 @@ async function runDesktop(baseUrl) {
 
 	const portalAdvanceDesktop = await advanceLevelsViaPortal(page, 1);
 
-	await browser.close();
+	await closeChromium(browser);
 	return {
 		level1Title,
 		colliderAtL1,
@@ -420,7 +475,7 @@ async function runDesktop(baseUrl) {
 }
 
 async function runDebugCheat(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 	await bootToPlay(page, baseUrl, '?debug=1');
 	const level1Title = await getLevelTitle(page);
@@ -433,7 +488,7 @@ async function runDebugCheat(baseUrl) {
 	const won = await page.evaluate(() =>
 		window.__icarusGame?.scene.isActive('Win'),
 	);
-	await browser.close();
+	await closeChromium(browser);
 	return {
 		debugCheatSkipped: levelAfterCheat !== level1Title,
 		level1Title,
@@ -444,7 +499,7 @@ async function runDebugCheat(baseUrl) {
 }
 
 async function runLivesAndDeath(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 	await bootToPlay(page, baseUrl);
 	await page.locator('canvas').click();
@@ -514,7 +569,7 @@ async function runLivesAndDeath(baseUrl) {
 		window.__icarusGame?.scene.isActive('Dead'),
 	);
 
-	await browser.close();
+	await closeChromium(browser);
 	return {
 		livesAfterTwo,
 		deathMs,
@@ -527,7 +582,7 @@ async function runLivesAndDeath(baseUrl) {
 }
 
 async function runAboutLigatures(baseUrl, expectedAbout) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 	await bootToAbout(page, baseUrl);
 	const aboutText = await page.evaluate(() => {
@@ -542,13 +597,13 @@ async function runAboutLigatures(baseUrl, expectedAbout) {
 		}
 		return '';
 	});
-	await browser.close();
+	await closeChromium(browser);
 	const aboutExactOk = aboutText === expectedAbout;
 	return { aboutExactOk, aboutTextLength: aboutText.length };
 }
 
 async function runGroundDash(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 	await applyCpuThrottleIfRequested(page);
 	await bootToPlay(page, baseUrl);
@@ -629,7 +684,7 @@ async function runGroundDash(baseUrl) {
 		return Math.max(endDelta, sum);
 	}, dashStartX);
 
-	await browser.close();
+	await closeChromium(browser);
 	return {
 		expectedMin,
 		delta: dashDistance,
@@ -798,7 +853,7 @@ async function portraitRoundTrip(page) {
 }
 
 async function runSideEdgeClamp(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 	await bootToPlay(page, baseUrl);
 	await page.locator('canvas').click();
@@ -908,7 +963,7 @@ async function runSideEdgeClamp(baseUrl) {
 		return p.isDead || play.isResetting;
 	});
 
-	await browser.close();
+	await closeChromium(browser);
 	return {
 		leftEdge,
 		rightEdge,
@@ -926,7 +981,7 @@ async function runSideEdgeClamp(baseUrl) {
 }
 
 async function runCanvasOrientationResize(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({
 		viewport: { width: 390, height: 844 },
 		isMobile: true,
@@ -977,7 +1032,7 @@ async function runCanvasOrientationResize(baseUrl) {
 			displayH,
 		};
 	});
-	await browser.close();
+	await closeChromium(browser);
 	return {
 		...after,
 		canvasResizeOk: after.ok === true,
@@ -985,7 +1040,7 @@ async function runCanvasOrientationResize(baseUrl) {
 }
 
 async function runPortraitGameplayPause(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({
 		viewport: { width: 390, height: 844 },
 		isMobile: true,
@@ -1021,7 +1076,7 @@ async function runPortraitGameplayPause(baseUrl) {
 			physicsPaused: Boolean(play?.physics?.world?.isPaused),
 		};
 	});
-	await browser.close();
+	await closeChromium(browser);
 	const portraitPauseOk =
 		portraitBoot.blockerVisible &&
 		portraitBoot.scenePaused &&
@@ -1032,7 +1087,7 @@ async function runPortraitGameplayPause(baseUrl) {
 }
 
 async function runPortraitPauseEdgeCases(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({
 		viewport: { width: 844, height: 390 },
 		isMobile: true,
@@ -1086,7 +1141,7 @@ async function runPortraitPauseEdgeCases(baseUrl) {
 			paused: Boolean(play?.isPaused || play?.physics?.world?.isPaused),
 		};
 	});
-	await browser.close();
+	await closeChromium(browser);
 	const userPauseStaysOk =
 		userPauseOpen &&
 		userPausePortrait.panel &&
@@ -1104,7 +1159,7 @@ async function runPortraitPauseEdgeCases(baseUrl) {
 }
 
 async function runDisplayPolicyChecks(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const desktopPage = await browser.newPage({
 		viewport: { width: 500, height: 800 },
 		hasTouch: false,
@@ -1140,7 +1195,7 @@ async function runDisplayPolicyChecks(baseUrl) {
 		};
 	});
 	await tabletPage.close();
-	await browser.close();
+	await closeChromium(browser);
 	return {
 		desktopNarrowOk:
 			!desktopNarrow.blockerVisible && !desktopNarrow.physicsPaused,
@@ -1360,7 +1415,7 @@ async function collectTouchHudOverlap(page) {
 
 async function runTouchHudChromeOverlapMatrix(baseUrl) {
 	const failures = [];
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	for (const vp of TOUCH_HUD_VIEWPORTS) {
 		const page = await browser.newPage({
 			viewport: vp,
@@ -1422,7 +1477,7 @@ async function runTouchHudChromeOverlapMatrix(baseUrl) {
 		}
 		await page.close();
 	}
-	await browser.close();
+	await closeChromium(browser);
 	return { touchHudChromeOverlapOk: failures.length === 0, failures };
 }
 
@@ -1461,7 +1516,7 @@ async function runTouchTitleChromeClearance(baseUrl) {
 		{ width: 932, height: 430 },
 	];
 	const failures = [];
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	for (const vp of viewports) {
 		const page = await browser.newPage({
 			viewport: vp,
@@ -1545,7 +1600,7 @@ async function runTouchTitleChromeClearance(baseUrl) {
 		}
 		await page.close();
 	}
-	await browser.close();
+	await closeChromium(browser);
 	return { touchTitleChromeOk: failures.length === 0, failures };
 }
 
@@ -1589,7 +1644,7 @@ async function runTouchSpawnSafety(baseUrl) {
 	const viewports = TOUCH_SPAWN_VIEWPORTS;
 	const failures = [];
 	const diag = process.env.QA_TOUCH_SPAWN_DIAG === '1';
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	try {
 	for (const vp of viewports) {
 		const page = await browser.newPage({
@@ -1808,7 +1863,7 @@ async function runTouchSpawnSafety(baseUrl) {
 		await page.close();
 	}
 	} finally {
-		await browser.close();
+		await closeChromium(browser);
 	}
 	return { touchSpawnOk: failures.length === 0, failures };
 }
@@ -1880,7 +1935,7 @@ async function evaluateTouchHudAtBoot(page) {
 
 async function runTouchDisplayResizeMutationProofs(baseUrl) {
 	const failures = [];
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({
 		viewport: { width: 844, height: 390 },
 		isMobile: true,
@@ -1993,7 +2048,7 @@ async function runTouchDisplayResizeMutationProofs(baseUrl) {
 	if (!hudWithResize.ok && !hudWithResize.skip) {
 		failures.push('hud-should-pass-after-display-resize');
 	}
-	await browser.close();
+	await closeChromium(browser);
 	return {
 		touchDisplayResizeMutationOk: failures.length === 0,
 		failures,
@@ -2006,7 +2061,7 @@ async function runTouchDisplayResizeMutationProofs(baseUrl) {
 }
 
 async function runJumpButtonLegibility(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({
 		viewport: { width: 844, height: 340 },
 		isMobile: true,
@@ -2066,7 +2121,7 @@ async function runJumpButtonLegibility(baseUrl) {
 			scale,
 		};
 	});
-	await browser.close();
+	await closeChromium(browser);
 	return { jumpButtonLegibilityOk: measure.ok, ...measure };
 }
 
@@ -2309,7 +2364,7 @@ async function runWallJitterHold(baseUrl) {
 	const frames = 60;
 	const failures = [];
 
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	for (const mobile of [false, true]) {
 		const page = await browser.newPage(
 			mobile
@@ -2349,7 +2404,7 @@ async function runWallJitterHold(baseUrl) {
 		}
 		await page.close();
 	}
-	await browser.close();
+	await closeChromium(browser);
 	return {
 		wallJitterHoldOk: failures.length === 0,
 		failures,
@@ -2364,7 +2419,7 @@ async function runPausePanelLayout(baseUrl) {
 		{ width: 1280, height: 720, mobile: false },
 	];
 	const failures = [];
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	for (const vp of viewports) {
 		const page = await browser.newPage(
 			vp.mobile
@@ -2430,12 +2485,12 @@ async function runPausePanelLayout(baseUrl) {
 		if (!layout.ok) failures.push({ viewport: vp, ...layout });
 		await page.close();
 	}
-	await browser.close();
+	await closeChromium(browser);
 	return { pausePanelLayoutOk: failures.length === 0, failures };
 }
 
 async function runTouchButtonPlatformClearance(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({
 		viewport: { width: 640, height: 360 },
 		isMobile: true,
@@ -2486,7 +2541,7 @@ async function runTouchButtonPlatformClearance(baseUrl) {
 			);
 		return { touchButtonPlatformOk: !overlap, jumpRect, platformCount: platforms.length };
 	});
-	await browser.close();
+	await closeChromium(browser);
 	return result;
 }
 
@@ -2548,7 +2603,7 @@ async function waitForPlayReady(page, timeoutMs = 15000) {
 }
 
 async function runTouchRelayoutPreservesHold(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({
 		viewport: { width: 844, height: 390 },
 		isMobile: true,
@@ -2597,7 +2652,7 @@ async function runTouchRelayoutPreservesHold(baseUrl) {
 		type: 'touchEnd',
 		touchPoints: [],
 	});
-	await browser.close();
+	await closeChromium(browser);
 	const movedWhileHeld =
 		touchState.right && afterHold.x - beforeResize.x > 40;
 	return {
@@ -2611,7 +2666,7 @@ async function runTouchRelayoutPreservesHold(baseUrl) {
 
 async function runJumpInPlaceStable(baseUrl) {
 	const failures = [];
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	for (const mobile of [false, true]) {
 		const page = await browser.newPage(
 			mobile
@@ -2636,12 +2691,12 @@ async function runJumpInPlaceStable(baseUrl) {
 		}
 		await page.close();
 	}
-	await browser.close();
+	await closeChromium(browser);
 	return { jumpInPlaceOk: failures.length === 0, failures };
 }
 
 async function runPlatformSideJump(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 	await bootToPlay(page, baseUrl);
 	await page.locator('canvas').click();
@@ -2681,12 +2736,12 @@ async function runPlatformSideJump(baseUrl) {
 	});
 	await page.keyboard.up('Space');
 	await page.keyboard.up('ArrowRight');
-	await browser.close();
+	await closeChromium(browser);
 	return { platformSideJumpOk: Boolean(result?.ok), ...result };
 }
 
 async function runStaleDashQueue(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 	await bootToPlay(page, baseUrl);
 	await page.evaluate(() => {
@@ -2722,12 +2777,12 @@ async function runStaleDashQueue(baseUrl) {
 			await page.keyboard.press('Enter');
 		})(),
 	]).then(([saw]) => saw);
-	await browser.close();
+	await closeChromium(browser);
 	return { staleDashQueueOk: !dashed };
 }
 
 async function runFireballPauseStack(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({
 		viewport: { width: 844, height: 390 },
 		isMobile: true,
@@ -2783,7 +2838,7 @@ async function runFireballPauseStack(baseUrl) {
 		}
 		return { ok: false, start };
 	});
-	await browser.close();
+	await closeChromium(browser);
 	return {
 		fireballPauseStackOk:
 			pausedCount.active <= 1 &&
@@ -2887,7 +2942,7 @@ async function sampleWallDashBounds(page, { side, disableWorldClamp }) {
 }
 
 async function runWallDashBoundsCheck(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 	await bootToPlay(page, baseUrl);
 	await page.locator('canvas').click();
@@ -2903,7 +2958,7 @@ async function runWallDashBoundsCheck(baseUrl) {
 		side: 'right',
 		disableWorldClamp: true,
 	});
-	await browser.close();
+	await closeChromium(browser);
 	const wallDashBoundsOk =
 		right.ok &&
 		left.ok &&
@@ -2920,7 +2975,7 @@ async function runWallDashBoundsCheck(baseUrl) {
 }
 
 async function runWallDashBoundsThrottled(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 	await applyCpuThrottleIfRequested(page);
 	await bootToPlay(page, baseUrl);
@@ -2933,7 +2988,7 @@ async function runWallDashBoundsThrottled(baseUrl) {
 		side: 'left',
 		disableWorldClamp: false,
 	});
-	await browser.close();
+	await closeChromium(browser);
 	return {
 		wallDashBoundsThrottledOk: right.ok && left.ok,
 		right,
@@ -2942,7 +2997,7 @@ async function runWallDashBoundsThrottled(baseUrl) {
 }
 
 async function runResizeProgressHold(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({
 		viewport: { width: 844, height: 390 },
 		isMobile: true,
@@ -2982,7 +3037,7 @@ async function runResizeProgressHold(baseUrl) {
 			failures.push({ level: idx + 1, before, after });
 		}
 	}
-	await browser.close();
+	await closeChromium(browser);
 	return { resizeProgressHoldOk: failures.length === 0, failures };
 }
 
@@ -2996,7 +3051,7 @@ async function runTouchChromeLivesGap(baseUrl) {
 		{ width: 640, height: 310 },
 	];
 	const failures = [];
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({
 		viewport: { width: 844, height: 390 },
 		isMobile: true,
@@ -3029,7 +3084,7 @@ async function runTouchChromeLivesGap(baseUrl) {
 		});
 		if (!gap.ok) failures.push({ viewport: vp, ...gap });
 	}
-	await browser.close();
+	await closeChromium(browser);
 	return { touchChromeLivesGapOk: failures.length === 0, failures };
 }
 
@@ -3040,7 +3095,7 @@ async function runTouchDeathSpawnStableDuringRise(baseUrl) {
 		{ width: 844, height: 390 },
 	];
 	const failures = [];
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({
 		viewport: { width: 844, height: 390 },
 		isMobile: true,
@@ -3099,7 +3154,7 @@ async function runTouchDeathSpawnStableDuringRise(baseUrl) {
 			failures.push({ viewport: vp, ...detail });
 		}
 	}
-	await browser.close();
+	await closeChromium(browser);
 	return {
 		touchDeathSpawnStableDuringRiseOk: failures.length === 0,
 		failures,
@@ -3116,7 +3171,7 @@ async function runDeathRotateTouchSpawnProbeMatrix(baseUrl) {
 	];
 	const delays = [100, 600, 1200];
 	const failures = [];
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({
 		viewport: { width: 844, height: 390 },
 		isMobile: true,
@@ -3192,7 +3247,7 @@ async function runDeathRotateTouchSpawnProbeMatrix(baseUrl) {
 			}
 		}
 	}
-	await browser.close();
+	await closeChromium(browser);
 	return {
 		deathRotateTouchSpawnProbeOk: failures.length === 0,
 		failures,
@@ -3202,7 +3257,7 @@ async function runDeathRotateTouchSpawnProbeMatrix(baseUrl) {
 
 async function runPortraitDeathLandscapeSpawnMatrix(baseUrl) {
 	const failures = [];
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({
 		viewport: { width: 844, height: 390 },
 		isMobile: true,
@@ -3243,7 +3298,7 @@ async function runPortraitDeathLandscapeSpawnMatrix(baseUrl) {
 		});
 		if (!detail.ok) failures.push({ level: level + 1, ...detail });
 	}
-	await browser.close();
+	await closeChromium(browser);
 	return {
 		portraitDeathLandscapeSpawnOk: failures.length === 0,
 		failures,
@@ -3251,7 +3306,7 @@ async function runPortraitDeathLandscapeSpawnMatrix(baseUrl) {
 }
 
 async function runTouchArrowSlide(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({
 		viewport: { width: 844, height: 390 },
 		isMobile: true,
@@ -3310,7 +3365,7 @@ async function runTouchArrowSlide(baseUrl) {
 		type: 'touchEnd',
 		touchPoints: [],
 	});
-	await browser.close();
+	await closeChromium(browser);
 	return {
 		touchArrowSlideOk:
 			!leftToRight.left &&
@@ -3322,7 +3377,7 @@ async function runTouchArrowSlide(baseUrl) {
 }
 
 async function runFireballFirstSpawnTiming(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({
 		viewport: { width: 844, height: 390 },
 		isMobile: true,
@@ -3417,7 +3472,7 @@ async function runFireballFirstSpawnTiming(baseUrl) {
 			onIdle();
 		});
 	});
-	await browser.close();
+	await closeChromium(browser);
 	const target = expectedFireballFirstSpawnMs(1000, 1800); // 1000ms (main schedule)
 	const near = (ms, slack = 100) =>
 		ms != null && ms >= target - slack && ms <= target + slack;
@@ -3451,7 +3506,7 @@ async function runTouchResizeButtonClearance(baseUrl) {
 		},
 	];
 	const failures = [];
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({
 		viewport: { width: 844, height: 390 },
 		isMobile: true,
@@ -3469,12 +3524,12 @@ async function runTouchResizeButtonClearance(baseUrl) {
 		const overlap = await collectTouchButtonOverlap(page);
 		if (!overlap.ok) failures.push({ case: caseDef, ...overlap });
 	}
-	await browser.close();
+	await closeChromium(browser);
 	return { touchResizeButtonClearanceOk: failures.length === 0, failures };
 }
 
 async function runL15RealKeys(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 	await applyCpuThrottleIfRequested(page);
 	let won = false;
@@ -3641,7 +3696,7 @@ async function runL15RealKeys(baseUrl) {
 		await page.keyboard.up('ArrowLeft');
 		if (won) break;
 	}
-	await browser.close();
+	await closeChromium(browser);
 	return {
 		l15RealKeysOk: won,
 		...(won ? {} : { lastDiagnostics }),
@@ -3649,7 +3704,7 @@ async function runL15RealKeys(baseUrl) {
 }
 
 async function runTouchRelayoutClearsHold(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({
 		viewport: { width: 844, height: 390 },
 		isMobile: true,
@@ -3694,7 +3749,7 @@ async function runTouchRelayoutClearsHold(baseUrl) {
 			left: Boolean(input?.left),
 		};
 	});
-	await browser.close();
+	await closeChromium(browser);
 	const movedWhileIdle = Math.abs(after.x - before.x) > 8;
 	return {
 		touchRelayoutClearsHoldOk:
@@ -3706,7 +3761,7 @@ async function runTouchRelayoutClearsHold(baseUrl) {
 }
 
 async function runPortraitUnfreezeCases(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({
 		viewport: { width: 844, height: 390 },
 		isMobile: true,
@@ -3863,7 +3918,7 @@ async function runPortraitUnfreezeCases(baseUrl) {
 	const afterRotateX = (await getPlayerPos(page)).x;
 	const postDeathRotatePreservesX = Math.abs(afterRotateX - progressX) <= 8;
 
-	await browser.close();
+	await closeChromium(browser);
 	return {
 		portraitUnfreezeOk:
 			deathCase.ok &&
@@ -3886,7 +3941,7 @@ async function runPortraitUnfreezeCases(baseUrl) {
 }
 
 async function runGainDoneLayout(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 	await bootToPlay(page, baseUrl);
 	await page.evaluate(() => {
@@ -3936,12 +3991,12 @@ async function runGainDoneLayout(baseUrl) {
 			doneTop: db.top,
 		};
 	});
-	await browser.close();
+	await closeChromium(browser);
 	return layout;
 }
 
 async function runTouchPauseToggle(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({
 		viewport: { width: 844, height: 390 },
 		isMobile: true,
@@ -3965,7 +4020,7 @@ async function runTouchPauseToggle(baseUrl) {
 		};
 	});
 	if (!pausePoint) {
-		await browser.close();
+		await closeChromium(browser);
 		return { touchPauseToggleOk: false };
 	}
 	await page.mouse.click(pausePoint.x, pausePoint.y);
@@ -3978,12 +4033,12 @@ async function runTouchPauseToggle(baseUrl) {
 	const closed = await page.evaluate(() =>
 		!window.__icarusGame?.scene.getScene('Play')?.pausePanel,
 	);
-	await browser.close();
+	await closeChromium(browser);
 	return { touchPauseToggleOk: opened && closed, opened, closed };
 }
 
 async function runLandscapeMinText(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({
 		viewport: { width: 844, height: 390 },
 		isMobile: true,
@@ -4080,7 +4135,7 @@ async function runLandscapeMinText(baseUrl) {
 	});
 	await page.waitForTimeout(400);
 	const pause = await measureInPage();
-	await browser.close();
+	await closeChromium(browser);
 	const samples = [gameplay, loss, regain, pause];
 	const smallest = Math.min(...samples.map((s) => s.smallestScreenPx));
 	return {
@@ -4096,7 +4151,7 @@ async function runLandscapeMinText(baseUrl) {
 }
 
 async function runLossScreenLayout(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 	await bootToPlay(page, baseUrl);
 	await page.evaluate(() => {
@@ -4123,12 +4178,12 @@ async function runLossScreenLayout(baseUrl) {
 			}));
 		return { height: h, overflow, lossScreenOk: overflow.length === 0 };
 	});
-	await browser.close();
+	await closeChromium(browser);
 	return layout;
 }
 
 async function runMobile(baseUrl) {
-	const browser = await chromium.launch();
+	return withLaunchedBrowser(async (browser) => {
 	const context = await browser.newContext({
 		viewport: { width: 844, height: 390 },
 		hasTouch: true,
@@ -4206,9 +4261,22 @@ async function runMobile(baseUrl) {
 	}
 	let touchJumpWorked = false;
 	if (jumpPoint) {
-		await page.mouse.move(jumpPoint.x, jumpPoint.y);
-		await page.mouse.down();
-		for (let i = 0; i < 24; i++) {
+		await page.evaluate(() => {
+			const play = window.__icarusGame?.scene.getScene('Play');
+			const p = play?.player;
+			const body = p?.sprite?.body;
+			if (!p || !body) return;
+			body.setVelocity(0, 0);
+			if (!body.touching.down) {
+				const start = play.levelManager.current.start;
+				p.sprite.setPosition(Math.max(start.x, p.sprite.x), start.y);
+				body.updateFromGameObject();
+			}
+			p.jumpCount = 0;
+		});
+		await page.waitForTimeout(120);
+		await holdTouchAt(page, jumpPoint, 140);
+		for (let i = 0; i < 32; i++) {
 			await page.waitForTimeout(50);
 			touchJumpWorked = await page.evaluate(() => {
 				const play = window.__icarusGame?.scene.getScene('Play');
@@ -4220,7 +4288,6 @@ async function runMobile(baseUrl) {
 			});
 			if (touchJumpWorked) break;
 		}
-		await page.mouse.up();
 	}
 
 	const startIndex = await getLevelIndex(page);
@@ -4237,7 +4304,6 @@ async function runMobile(baseUrl) {
 			portalMobileLevel2 && (await getLevelIndex(page)) === startIndex + 1;
 	}
 
-	await browser.close();
 	return {
 		widthRatio,
 		touchButtonCount,
@@ -4249,6 +4315,7 @@ async function runMobile(baseUrl) {
 		moveBeforeX: beforeMove.x,
 		moveAfterX: afterMove.x,
 	};
+	});
 }
 
 async function applyCpuThrottleIfRequested(page) {
@@ -4259,7 +4326,7 @@ async function applyCpuThrottleIfRequested(page) {
 
 async function runTouchUrlBarShrinkAsserts(baseUrl) {
 	const failures = [];
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({
 		viewport: { width: 844, height: 390 },
 		isMobile: true,
@@ -4290,12 +4357,12 @@ async function runTouchUrlBarShrinkAsserts(baseUrl) {
 			failures.push({ case: caseDef, kind: 'spawn', ...spawn });
 		}
 	}
-	await browser.close();
+	await closeChromium(browser);
 	return { touchUrlBarShrinkOk: failures.length === 0, failures };
 }
 
 async function runTouchDeathPhysicsPaused(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({
 		viewport: { width: 844, height: 390 },
 		isMobile: true,
@@ -4332,7 +4399,7 @@ async function runTouchDeathPhysicsPaused(baseUrl) {
 		}
 		return { maxFireballs, timersUnpaused, physicsRunning };
 	});
-	await browser.close();
+	await closeChromium(browser);
 	return {
 		touchDeathPhysicsPausedOk:
 			sample.maxFireballs === 0 && !sample.timersUnpaused,
@@ -4341,7 +4408,7 @@ async function runTouchDeathPhysicsPaused(baseUrl) {
 }
 
 async function runTouchDeathHudResize(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({
 		viewport: { width: 844, height: 390 },
 		isMobile: true,
@@ -4371,12 +4438,12 @@ async function runTouchDeathHudResize(baseUrl) {
 			pause.bottom > lives.top;
 		return { ok: !overlap, pause, lives };
 	});
-	await browser.close();
+	await closeChromium(browser);
 	return { touchDeathHudResizeOk: gap.ok, ...gap };
 }
 
 async function runTouchDualFingerSameButton(baseUrl) {
-	const browser = await chromium.launch();
+	const browser = await launchChromium();
 	const page = await browser.newPage({
 		viewport: { width: 844, height: 390 },
 		isMobile: true,
@@ -4433,7 +4500,7 @@ async function runTouchDualFingerSameButton(baseUrl) {
 			window.__icarusGame?.scene.getScene('Play')?.touchControls?.getInput()
 				?.right === true,
 	);
-	await browser.close();
+	await closeChromium(browser);
 	return {
 		touchDualFingerSameButtonOk:
 			heldA && heldAfterBLift && !heldAfterALift,
@@ -4480,37 +4547,39 @@ async function main() {
 	const allOpeningRoutesOk = openingRoutes.every((row) => row.ok);
 	const daedalusRoute = openingRoutes.find((row) => row.name === 'Daedalus Interlude');
 	const { server, baseUrl } = await startStaticServer();
+	qaWalkHttpServer = server;
 	if (process.env.QA_TOUCH_SPAWN_ONLY === '1') {
 		const touchSpawn = await runTouchSpawnSafety(baseUrl);
-		server.close();
 		console.log(JSON.stringify({ touchSpawn }, null, 2));
-		process.exit(touchSpawn.touchSpawnOk ? 0 : 1);
+		await exitQaWalk(touchSpawn.touchSpawnOk ? 0 : 1);
 	}
 	if (process.env.QA_PORTRAIT_UNFREEZE_ONLY === '1') {
 		const portraitUnfreeze = await runPortraitUnfreezeCases(baseUrl);
-		server.close();
 		console.log(JSON.stringify({ portraitUnfreeze }, null, 2));
-		process.exit(portraitUnfreeze.portraitUnfreezeOk ? 0 : 1);
+		await exitQaWalk(portraitUnfreeze.portraitUnfreezeOk ? 0 : 1);
 	}
 	if (process.env.QA_L15_ONLY === '1') {
 		const l15RealKeys = await runL15RealKeys(baseUrl);
-		server.close();
 		console.log(JSON.stringify({ l15RealKeys }, null, 2));
-		process.exit(l15RealKeys.l15RealKeysOk ? 0 : 1);
+		await exitQaWalk(l15RealKeys.l15RealKeysOk ? 0 : 1);
 	}
 	if (process.env.QA_DEATH_ROTATE_PROBE === '1') {
 		const deathRotateTouchSpawnProbe =
 			await runDeathRotateTouchSpawnProbeMatrix(baseUrl);
-		server.close();
-		console.log(JSON.stringify({ deathRotateTouchSpawnProbe }, null, 2));
-		process.exit(deathRotateTouchSpawnProbe.deathRotateTouchSpawnProbeOk ? 0 : 1);
+		console.log(
+			JSON.stringify({ deathRotateTouchSpawnProbe }, null, 2),
+		);
+		await exitQaWalk(
+			deathRotateTouchSpawnProbe.deathRotateTouchSpawnProbeOk ? 0 : 1,
+		);
 	}
 	if (process.env.QA_DEATH_SPAWN_RISE === '1') {
 		const touchDeathSpawnStableDuringRise =
 			await runTouchDeathSpawnStableDuringRise(baseUrl);
-		server.close();
-		console.log(JSON.stringify({ touchDeathSpawnStableDuringRise }, null, 2));
-		process.exit(
+		console.log(
+			JSON.stringify({ touchDeathSpawnStableDuringRise }, null, 2),
+		);
+		await exitQaWalk(
 			touchDeathSpawnStableDuringRise.touchDeathSpawnStableDuringRiseOk
 				? 0
 				: 1,
@@ -4518,9 +4587,8 @@ async function main() {
 	}
 	if (process.env.QA_FIREBALL_TIMING_ONLY === '1') {
 		const fireballFirstSpawnTiming = await runFireballFirstSpawnTiming(baseUrl);
-		server.close();
 		console.log(JSON.stringify({ fireballFirstSpawnTiming }, null, 2));
-		process.exit(fireballFirstSpawnTiming.fireballFirstSpawnTimingOk ? 0 : 1);
+		await exitQaWalk(fireballFirstSpawnTiming.fireballFirstSpawnTimingOk ? 0 : 1);
 	}
 	// Before long browser suites so touch layout settle is not starved under CPU throttle.
 	const touchSpawn = await runTouchSpawnSafety(baseUrl);
@@ -4585,7 +4653,6 @@ async function main() {
 	const touchPauseToggle = await runTouchPauseToggle(baseUrl);
 	const lossScreen = await runLossScreenLayout(baseUrl);
 	const mobile = await runMobile(baseUrl);
-	server.close();
 
 	const collidersStable = desktop.collidersStable;
 	const pass =
@@ -4715,11 +4782,11 @@ async function main() {
 			2,
 		),
 	);
-	process.exit(pass ? 0 : 1);
+	await exitQaWalk(pass ? 0 : 1);
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
 	console.error(err);
 	console.log(JSON.stringify({ pass: false, fatal: String(err) }, null, 2));
-	process.exit(1);
+	await exitQaWalk(1);
 });
