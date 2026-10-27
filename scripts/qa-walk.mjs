@@ -768,6 +768,46 @@ async function holdTouchLeft(page, ms = 2500) {
 	return holdTouchAt(page, await touchPointForTarget(page, 'left'), ms);
 }
 
+/** Poll jump while the jump button is held — jumpCount resets on landing after touchEnd. */
+async function probeTouchJumpWorked(page, screenPoint) {
+	if (!screenPoint) return false;
+	const client = await page.context().newCDPSession(page);
+	await client.send('Emulation.setTouchEmulationEnabled', {
+		enabled: true,
+		maxTouchPoints: 1,
+	});
+	const point = {
+		x: screenPoint.x,
+		y: screenPoint.y,
+		radiusX: 1,
+		radiusY: 1,
+		force: 1,
+		id: 0,
+	};
+	await client.send('Input.dispatchTouchEvent', {
+		type: 'touchStart',
+		touchPoints: [point],
+	});
+	let worked = false;
+	for (let i = 0; i < 32; i++) {
+		await page.waitForTimeout(50);
+		worked = await page.evaluate(() => {
+			const play = window.__icarusGame?.scene.getScene('Play');
+			const body = play?.player?.sprite?.body;
+			return (
+				(play?.player?.jumpCount ?? 0) > 0 ||
+				(body?.velocity?.y ?? 0) < -60
+			);
+		});
+		if (worked) break;
+	}
+	await client.send('Input.dispatchTouchEvent', {
+		type: 'touchEnd',
+		touchPoints: [],
+	});
+	return worked;
+}
+
 async function assertUnfrozenAndMoving(page) {
 	await page.keyboard.up('ArrowRight');
 	await page.keyboard.up('ArrowLeft');
@@ -4272,41 +4312,7 @@ async function runMobile(baseUrl) {
 			p.jumpCount = 0;
 		});
 		await page.waitForTimeout(200);
-		const jumpHoldMs =
-			process.env.QA_CPU_THROTTLE === '1' ? 320 : 140;
-		await holdTouchAt(page, jumpPoint, jumpHoldMs);
-		for (let i = 0; i < 32; i++) {
-			await page.waitForTimeout(50);
-			touchJumpWorked = await page.evaluate(() => {
-				const play = window.__icarusGame?.scene.getScene('Play');
-				const body = play?.player?.sprite?.body;
-				return (
-					(play?.player?.jumpCount ?? 0) > 0 ||
-					(body?.velocity?.y ?? 0) < -60
-				);
-			});
-			if (touchJumpWorked) break;
-		}
-		if (!touchJumpWorked) {
-			await page.evaluate(() => {
-				window.__icarusGame?.scene
-					.getScene('Play')
-					?.touchControls?.releaseAllHolds?.();
-			});
-			await page.touchscreen.tap(jumpPoint.x, jumpPoint.y);
-			for (let i = 0; i < 16; i++) {
-				await page.waitForTimeout(50);
-				touchJumpWorked = await page.evaluate(() => {
-					const play = window.__icarusGame?.scene.getScene('Play');
-					const body = play?.player?.sprite?.body;
-					return (
-						(play?.player?.jumpCount ?? 0) > 0 ||
-						(body?.velocity?.y ?? 0) < -60
-					);
-				});
-				if (touchJumpWorked) break;
-			}
-		}
+		touchJumpWorked = await probeTouchJumpWorked(page, jumpPoint);
 	}
 
 	const startIndex = await getLevelIndex(page);
