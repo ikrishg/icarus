@@ -12,14 +12,41 @@ let qaWalkHttpServer = null;
 
 async function launchChromium(options = {}) {
 	const userDataDir = process.env.QA_CHROMIUM_USER_DATA_DIR;
-	const launchOptions = { ...options };
 	if (userDataDir) {
-		launchOptions.args = [
-			...(launchOptions.args ?? []),
-			`--user-data-dir=${userDataDir}`,
-		];
+		const context = await chromium.launchPersistentContext(userDataDir, {
+			headless: true,
+			...options,
+		});
+		const wrapper = {
+			async newPage(pageOptions = {}) {
+				const page = await context.newPage();
+				if (pageOptions.viewport) {
+					await page.setViewportSize(pageOptions.viewport);
+				}
+				return page;
+			},
+			async newContext(ctxOptions = {}) {
+				const page = await context.newPage();
+				if (ctxOptions.viewport) {
+					await page.setViewportSize(ctxOptions.viewport);
+				}
+				return {
+					async newPage() {
+						return page;
+					},
+					async close() {
+						await page.close();
+					},
+				};
+			},
+			async close() {
+				await context.close();
+			},
+		};
+		trackedBrowsers.add(wrapper);
+		return wrapper;
 	}
-	const browser = await chromium.launch(launchOptions);
+	const browser = await chromium.launch(options);
 	trackedBrowsers.add(browser);
 	return browser;
 }

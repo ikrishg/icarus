@@ -64,8 +64,13 @@ run_isolated_node() {
 
 touch_ok=0
 touch_attempt=0
+touch_max_attempts=50
 while [ "$touch_ok" -lt 10 ]; do
   touch_attempt=$((touch_attempt + 1))
+  if [ "$touch_attempt" -gt "$touch_max_attempts" ]; then
+    echo "TOUCH_ABORT attempts=${touch_attempt} ok=${touch_ok}" | tee -a "$LOG"
+    exit 1
+  fi
   if run_isolated_node "touch-${touch_attempt}" QA_TOUCH_SPAWN_ONLY=1 >/dev/null 2>&1; then
     touch_ok=$((touch_ok + 1))
   else
