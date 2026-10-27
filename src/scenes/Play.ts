@@ -235,8 +235,13 @@ export class Play extends Scene {
 				}
 				return track?.samples ?? [];
 			};
-			window.__icarusIsTouchSpawnLayoutSettled = () =>
-				this.isTouchSpawnLayoutSettled();
+			window.__icarusIsTouchSpawnLayoutSettled = () => {
+				if (this.isTouchSpawnLayoutSettled()) {
+					this.reconcileTouchSpawnSpriteWithExpected();
+					return true;
+				}
+				return false;
+			};
 			window.__icarusTouchSpawnDiagnostics = () => {
 				const sprite = this.player?.sprite;
 				const want = this.touchSpawnExpectedAtCurrentLayout();
@@ -264,6 +269,8 @@ export class Play extends Scene {
 						this.clearLevelInstruction();
 						this.clearColliders();
 						this.lastTouchSpawnPlacement = null;
+						this.resizePushTimer?.remove(false);
+						this.resizePushGeneration++;
 						this.levelManager.firstFireballSpawnOffsetMs = null;
 						this.isResetting = false;
 						this.pendingTouchLandscapeSpawn = false;
@@ -277,7 +284,6 @@ export class Play extends Scene {
 						world.resume();
 						const spawn = this.resolveTouchSpawnPlacement();
 						this.player.revive(spawn.x, spawn.y);
-						this.setupLevelColliders();
 						if (this.touchControls?.visible) {
 							this.repositionTouchSpawnIfOverlappingButtons();
 						}
@@ -298,6 +304,22 @@ export class Play extends Scene {
 						if (!this.pendingTouchDeathRespawn) {
 							this.syncPlayerToTouchSpawnAtCurrentLayout();
 						}
+						if (
+							this.touchControls?.visible &&
+							isTouchDevice(this) &&
+							!this.pendingTouchDeathRespawn
+						) {
+							const want = this.touchSpawnExpectedAtCurrentLayout();
+							this.player.revive(want.x, want.y);
+							this.lastTouchSpawnPlacement = {
+								x: want.x,
+								y: want.y,
+							};
+						}
+						this.setupLevelColliders();
+						this.reconcileTouchSpawnSpriteWithExpected();
+						this.resizePushTimer?.remove(false);
+						this.resizePushGeneration++;
 						this.preparingTouchLevelForQa = false;
 						return true;
 					} finally {
@@ -409,6 +431,14 @@ export class Play extends Scene {
 				this.applyTouchRespawnAtCurrentLayout();
 			}
 			this.lastWindowAspectPortrait = aspectPortrait;
+			if (
+				this.isTouchSpawnLayoutSettled() &&
+				!this.isResetting &&
+				this.player &&
+				!this.player.isDead
+			) {
+				this.reconcileTouchSpawnSpriteWithExpected();
+			}
 		}
 		if (isTouchDevice(this)) {
 			if (
@@ -600,10 +630,7 @@ export class Play extends Scene {
 		this.player.revive(spawnPos.x, spawnPos.y);
 		if (this.touchControls?.visible && !this.pendingTouchDeathRespawn) {
 			this.repositionTouchSpawnIfOverlappingButtons();
-			this.lastTouchSpawnPlacement = {
-				x: this.player.sprite.x,
-				y: this.player.sprite.y,
-			};
+			this.lastTouchSpawnPlacement = spawnPos;
 		}
 		const deathSpawnTrack = window.__icarusDeathSpawnXTrack;
 		if (deathSpawnTrack?.active && this.isResetting) {
@@ -1025,6 +1052,43 @@ export class Play extends Scene {
 		}
 	}
 
+	/** Snap sprite to expected touch spawn when layout settled but position is stale. */
+	private reconcileTouchSpawnSpriteWithExpected(): void {
+		if (
+			!this.touchControls?.visible ||
+			!this.player?.sprite?.body ||
+			this.player.isDead ||
+			this.isResetting
+		) {
+			return;
+		}
+		if (this.touchResizePreservesPlayerProgress()) {
+			return;
+		}
+		const want = this.touchSpawnExpectedAtCurrentLayout();
+		const tol = 4;
+		const px = this.player.sprite.x;
+		if (Math.abs(px - want.x) <= tol) {
+			return;
+		}
+		const placed = this.lastTouchSpawnPlacement;
+		const staleLayoutSpawn =
+			placed != null &&
+			Math.abs(px - placed.x) <= tol &&
+			Math.abs(placed.x - want.x) > tol;
+		if (!staleLayoutSpawn && this.playerAwayFromTouchSpawnBand()) {
+			if (
+				placed != null ||
+				this.touchResizePreservesPlayerProgress() ||
+				Math.abs(px - want.x) <= tol
+			) {
+				return;
+			}
+		}
+		this.player.revive(want.x, want.y);
+		this.lastTouchSpawnPlacement = { x: want.x, y: want.y };
+	}
+
 	private syncPlayerToTouchSpawnAtCurrentLayout(): void {
 		if (
 			!this.touchControls?.visible ||
@@ -1246,6 +1310,7 @@ export class Play extends Scene {
 		}
 		this.touchSpawnLayoutEpochDone = this.touchSpawnLayoutEpoch;
 		this.touchSpawnSettledAtFrame = this.game.loop.frame;
+		this.reconcileTouchSpawnSpriteWithExpected();
 	}
 
 	private touchResizePreservesPlayerProgress(): boolean {
@@ -1511,12 +1576,8 @@ export class Play extends Scene {
 		this.touchControls.relayout();
 		this.relayoutTouchChromeHud();
 		const placed = this.resolveTouchSpawnPlacement(false);
-		this.lastTouchSpawnPlacement = placed;
 		this.repositionTouchSpawnIfOverlappingButtons();
-		this.lastTouchSpawnPlacement = {
-			x: this.player.sprite.x,
-			y: this.player.sprite.y,
-		};
+		this.lastTouchSpawnPlacement = placed;
 		this.pendingTouchDeathRespawn = false;
 		this.pendingTouchLandscapeSpawn = false;
 		this.touchSpawnLayoutEpoch++;

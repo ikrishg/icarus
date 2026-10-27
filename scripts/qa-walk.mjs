@@ -1688,8 +1688,6 @@ async function runTouchSpawnSafety(baseUrl) {
 		for (let level = 0; level < 15; level++) {
 			const prepared = await page.evaluate((idx) => {
 				const ok = window.__icarusPrepareLevel?.(idx);
-				const play = window.__icarusGame?.scene?.getScene('Play');
-				play?.handleDisplayResize?.();
 				return {
 					ok,
 					settled: window.__icarusIsTouchSpawnLayoutSettled?.() === true,
@@ -1731,6 +1729,7 @@ async function runTouchSpawnSafety(baseUrl) {
 					);
 				const play = window.__icarusGame?.scene.getScene('Play');
 				if (!play?.touchControls?.visible) return { ok: true };
+				window.__icarusIsTouchSpawnLayoutSettled?.();
 				const levelDef = play.levelManager.current;
 				const startX = levelDef.start.x;
 				const spawnX = play.player.sprite.x;
