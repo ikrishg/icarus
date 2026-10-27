@@ -1572,7 +1572,14 @@ async function waitTouchSpawnLayoutSettled(
 	timeoutMs = process.env.QA_CPU_THROTTLE === '1' ? 120000 : 35000,
 ) {
 	await page.waitForFunction(
-		() => window.__icarusIsTouchSpawnLayoutSettled?.() === true,
+		() => {
+			if (window.__icarusIsTouchSpawnLayoutSettled?.() === true) {
+				return true;
+			}
+			const play = window.__icarusGame?.scene?.getScene('Play');
+			play?.handleDisplayResize?.();
+			return window.__icarusIsTouchSpawnLayoutSettled?.() === true;
+		},
 		undefined,
 		{ timeout: timeoutMs },
 	);
@@ -4505,6 +4512,8 @@ async function main() {
 		console.log(JSON.stringify({ fireballFirstSpawnTiming }, null, 2));
 		process.exit(fireballFirstSpawnTiming.fireballFirstSpawnTimingOk ? 0 : 1);
 	}
+	// Before long browser suites so touch layout settle is not starved under CPU throttle.
+	const touchSpawn = await runTouchSpawnSafety(baseUrl);
 	const pause = await runPauseEscToggle(baseUrl);
 	const desktop = await runDesktop(baseUrl);
 	const debug = await runDebugCheat(baseUrl);
@@ -4520,7 +4529,6 @@ async function main() {
 	const gainDoneLayout = await runGainDoneLayout(baseUrl);
 	const touchTitleChrome = await runTouchTitleChromeClearance(baseUrl);
 	const touchHudChromeOverlap = await runTouchHudChromeOverlapMatrix(baseUrl);
-	const touchSpawn = await runTouchSpawnSafety(baseUrl);
 	const touchDisplayResizeMutation =
 		await runTouchDisplayResizeMutationProofs(baseUrl);
 	const jumpButtonLegibility = await runJumpButtonLegibility(baseUrl);

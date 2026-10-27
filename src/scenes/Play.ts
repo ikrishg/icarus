@@ -291,6 +291,12 @@ export class Play extends Scene {
 						this.levelManager.syncFireballSpawnClock();
 						this.levelManager.setFireballTimersPaused(false);
 						this.syncPortraitBlockerPause();
+						this.touchSpawnLayoutEpoch++;
+						if (!this.pendingTouchDeathRespawn) {
+							this.syncPlayerToTouchSpawnAtCurrentLayout();
+						}
+						this.touchSpawnLayoutEpochDone = this.touchSpawnLayoutEpoch;
+						this.touchSpawnSettledAtFrame = this.game.loop.frame;
 						return true;
 					} finally {
 						if (wasPaused) {
