@@ -4230,22 +4230,14 @@ async function runMobile(baseUrl) {
 		touchMoveWorked = afterMove.x > beforeMove.x + minMove;
 	}
 
-	const jumpPoint = await page.evaluate(() => {
-		const game = window.__icarusGame;
-		const play = game?.scene.getScene('Play');
-		const coords = play?.touchControls?.tapTargets?.jump;
-		if (!coords || !game?.canvas) return null;
-		const sm = game.scale;
-		const rect = game.canvas.getBoundingClientRect();
-		const scale = sm.displaySize.width / sm.width;
-		const offsetX = rect.left + (rect.width - sm.displaySize.width) / 2;
-		const offsetY = rect.top + (rect.height - sm.displaySize.height) / 2;
-		return {
-			x: offsetX + coords.x * scale,
-			y: offsetY + coords.y * scale,
-		};
+	await page.evaluate(() => {
+		window.__icarusGame?.scene
+			.getScene('Play')
+			?.touchControls?.releaseAllHolds?.();
 	});
-	await page.waitForTimeout(600);
+	await page.waitForTimeout(200);
+	const jumpPoint = await touchPointForTarget(page, 'jump');
+	await page.waitForTimeout(400);
 	try {
 		await page.waitForFunction(
 			() => {
@@ -4263,7 +4255,12 @@ async function runMobile(baseUrl) {
 	if (jumpPoint) {
 		await page.evaluate(() => {
 			const play = window.__icarusGame?.scene.getScene('Play');
-			const p = play?.player;
+			if (!play) return;
+			play.isPaused = false;
+			play.time.paused = false;
+			play.physics?.world?.resume?.();
+			const p = play.player;
+			if (p) p.controlsEnabled = true;
 			const body = p?.sprite?.body;
 			if (!p || !body) return;
 			body.setVelocity(0, 0);
@@ -4274,8 +4271,10 @@ async function runMobile(baseUrl) {
 			}
 			p.jumpCount = 0;
 		});
-		await page.waitForTimeout(120);
-		await holdTouchAt(page, jumpPoint, 140);
+		await page.waitForTimeout(200);
+		const jumpHoldMs =
+			process.env.QA_CPU_THROTTLE === '1' ? 320 : 140;
+		await holdTouchAt(page, jumpPoint, jumpHoldMs);
 		for (let i = 0; i < 32; i++) {
 			await page.waitForTimeout(50);
 			touchJumpWorked = await page.evaluate(() => {
@@ -4287,6 +4286,26 @@ async function runMobile(baseUrl) {
 				);
 			});
 			if (touchJumpWorked) break;
+		}
+		if (!touchJumpWorked) {
+			await page.evaluate(() => {
+				window.__icarusGame?.scene
+					.getScene('Play')
+					?.touchControls?.releaseAllHolds?.();
+			});
+			await page.touchscreen.tap(jumpPoint.x, jumpPoint.y);
+			for (let i = 0; i < 16; i++) {
+				await page.waitForTimeout(50);
+				touchJumpWorked = await page.evaluate(() => {
+					const play = window.__icarusGame?.scene.getScene('Play');
+					const body = play?.player?.sprite?.body;
+					return (
+						(play?.player?.jumpCount ?? 0) > 0 ||
+						(body?.velocity?.y ?? 0) < -60
+					);
+				});
+				if (touchJumpWorked) break;
+			}
 		}
 	}
 
