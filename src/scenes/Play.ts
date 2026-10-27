@@ -150,6 +150,8 @@ export class Play extends Scene {
 	private touchSpawnLayoutEpochDone = 0;
 	private touchSpawnSettledAtFrame = 0;
 	private lastTouchSpawnPlacement: { x: number; y: number } | null = null;
+	/** While true, always snap player to touch spawn (QA prepareLevel). */
+	private preparingTouchLevelForQa = false;
 
 	constructor() {
 		super('Play');
@@ -291,12 +293,12 @@ export class Play extends Scene {
 						this.levelManager.syncFireballSpawnClock();
 						this.levelManager.setFireballTimersPaused(false);
 						this.syncPortraitBlockerPause();
-						this.touchSpawnLayoutEpoch++;
+						this.preparingTouchLevelForQa = true;
+						this.handleDisplayResize();
 						if (!this.pendingTouchDeathRespawn) {
 							this.syncPlayerToTouchSpawnAtCurrentLayout();
 						}
-						this.touchSpawnLayoutEpochDone = this.touchSpawnLayoutEpoch;
-						this.touchSpawnSettledAtFrame = this.game.loop.frame;
+						this.preparingTouchLevelForQa = false;
 						return true;
 					} finally {
 						if (wasPaused) {
@@ -1032,8 +1034,9 @@ export class Play extends Scene {
 			return;
 		}
 		if (
-			this.playerAwayFromTouchSpawnBand() ||
-			this.touchResizePreservesPlayerProgress()
+			!this.preparingTouchLevelForQa &&
+			(this.playerAwayFromTouchSpawnBand() ||
+				this.touchResizePreservesPlayerProgress())
 		) {
 			return;
 		}
@@ -1124,6 +1127,7 @@ export class Play extends Scene {
 		const prev = { x: sprite.x, y: sprite.y };
 		this.resetPlayerToLevelStartForSpawnPick();
 		try {
+			this.ensureTouchSpawnLayoutFits();
 			return this.touchSpawnCoordsAtCurrentLayoutScale();
 		} finally {
 			sprite.setPosition(prev.x, prev.y);
