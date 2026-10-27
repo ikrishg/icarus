@@ -43,21 +43,17 @@ console.log(['$tag',pass,l15,fe,'$exit'].join('\t'));
 " >> "$SUMMARY" 2>/dev/null || echo -e "$tag\tparse_fail\t\t\t$exit" >> "$SUMMARY"
 }
 
-run_isolated_node() {
+run_isolated_walk() {
   local tag="$1"
   shift
   local extra_env=("$@")
-  local chrome_dir="/tmp/qa-chrome-${tag}-$$-$(date +%s%N)"
-  rm -rf "$chrome_dir"
-  mkdir -p "$chrome_dir"
   cleanup_all
   npx vite build --config vite/config.qa.mjs >/dev/null
-  env -u QA_SKIP_VITE_BUILD -u QA_CPU_THROTTLE \
-    QA_CHROMIUM_USER_DATA_DIR="$chrome_dir" \
+  env -u QA_CPU_THROTTLE \
+    QA_SKIP_VITE_BUILD=1 \
     "${extra_env[@]}" \
     node scripts/qa-walk.mjs
   local ec=$?
-  rm -rf "$chrome_dir"
   cleanup_all
   return "$ec"
 }
@@ -71,7 +67,7 @@ while [ "$touch_ok" -lt 10 ]; do
     echo "TOUCH_ABORT attempts=${touch_attempt} ok=${touch_ok}" | tee -a "$LOG"
     exit 1
   fi
-  if run_isolated_node "touch-${touch_attempt}" QA_TOUCH_SPAWN_ONLY=1 >/dev/null 2>&1; then
+  if run_isolated_walk "touch-${touch_attempt}" QA_TOUCH_SPAWN_ONLY=1 >/dev/null 2>&1; then
     touch_ok=$((touch_ok + 1))
   else
     echo "touchFAIL attempt=${touch_attempt} ok=${touch_ok}" | tee -a "$LOG"
@@ -79,7 +75,7 @@ while [ "$touch_ok" -lt 10 ]; do
 done
 echo "TOUCH_DONE ok=${touch_ok}/10 attempts=${touch_attempt}" | tee -a "$LOG"
 
-if ! run_isolated_node "probe" QA_DEATH_ROTATE_PROBE=1 >/dev/null 2>&1; then
+if ! run_isolated_walk "probe" QA_DEATH_ROTATE_PROBE=1 >/dev/null 2>&1; then
   echo PROBE_FAIL | tee -a "$LOG"
 fi
 echo PROBE_DONE | tee -a "$LOG"
@@ -87,7 +83,7 @@ echo PROBE_DONE | tee -a "$LOG"
 for i in 1 2 3 4 5; do
   echo "t$i" | tee -a "$LOG"
   json="/tmp/donebar-t$i.json"
-  run_isolated_node "t$i" QA_CPU_THROTTLE=1 > "$json" 2>"$json.err" | rg '"pass"|l15RealKeysOk|touchSpawnOk|portraitUnfreezeOk|fireballFirstSpawnTimingOk|firstEntryMs' | tee -a "$LOG"
+  run_isolated_walk "t$i" QA_CPU_THROTTLE=1 > "$json" 2>"$json.err" | rg '"pass"|l15RealKeysOk|touchSpawnOk|portraitUnfreezeOk|fireballFirstSpawnTimingOk|firstEntryMs' | tee -a "$LOG"
   ec=${PIPESTATUS[0]}
   echo "exit=${ec}" | tee -a "$LOG"
   summarize "t$i" "$json" "$ec"
@@ -96,7 +92,7 @@ done
 for i in 1 2 3 4 5; do
   echo "u$i" | tee -a "$LOG"
   json="/tmp/donebar-u$i.json"
-  run_isolated_node "u$i" > "$json" 2>"$json.err" | rg '"pass"|l15RealKeysOk|touchSpawnOk|portraitUnfreezeOk|fireballFirstSpawnTimingOk|firstEntryMs' | tee -a "$LOG"
+  run_isolated_walk "u$i" > "$json" 2>"$json.err" | rg '"pass"|l15RealKeysOk|touchSpawnOk|portraitUnfreezeOk|fireballFirstSpawnTimingOk|firstEntryMs' | tee -a "$LOG"
   ec=${PIPESTATUS[0]}
   echo "exit=${ec}" | tee -a "$LOG"
   summarize "u$i" "$json" "$ec"
