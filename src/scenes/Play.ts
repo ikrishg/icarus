@@ -1092,10 +1092,11 @@ export class Play extends Scene {
 			placed != null &&
 			Math.abs(px - placed.x) <= tol &&
 			Math.abs(placed.x - want.x) > tol;
+		const nearWant = Math.abs(px - want.x) <= 96;
 		const nearSpawnBand =
-			Math.abs(px - want.x) <= 96 ||
 			staleLayoutSpawn ||
-			placed == null;
+			(placed == null && nearWant) ||
+			(nearWant && !this.playerAwayFromTouchSpawnBand());
 		if (!nearSpawnBand && this.playerAwayFromTouchSpawnBand()) {
 			return;
 		}
