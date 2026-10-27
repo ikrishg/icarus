@@ -1590,6 +1590,7 @@ async function runTouchSpawnSafety(baseUrl) {
 	const failures = [];
 	const diag = process.env.QA_TOUCH_SPAWN_DIAG === '1';
 	const browser = await chromium.launch();
+	try {
 	for (const vp of viewports) {
 		const page = await browser.newPage({
 			viewport: vp,
@@ -1598,11 +1599,18 @@ async function runTouchSpawnSafety(baseUrl) {
 		});
 		await bootToPlay(page, baseUrl);
 		for (let level = 0; level < 15; level++) {
-			await page.evaluate((idx) => {
-				window.__icarusPrepareLevel?.(idx);
-				window.__icarusGame?.scene.getScene('Play')?.handleDisplayResize?.();
+			const prepared = await page.evaluate((idx) => {
+				const ok = window.__icarusPrepareLevel?.(idx);
+				const play = window.__icarusGame?.scene?.getScene('Play');
+				play?.handleDisplayResize?.();
+				return {
+					ok,
+					settled: window.__icarusIsTouchSpawnLayoutSettled?.() === true,
+				};
 			}, level);
-			await waitTouchSpawnLayoutSettled(page);
+			if (!prepared?.settled) {
+				await waitTouchSpawnLayoutSettled(page);
+			}
 			for (const phase of ['spawn-check', 'death-respawn']) {
 			if (phase === 'death-respawn') {
 				await page.evaluate(() => {
@@ -1799,7 +1807,9 @@ async function runTouchSpawnSafety(baseUrl) {
 		}
 		await page.close();
 	}
-	await browser.close();
+	} finally {
+		await browser.close();
+	}
 	return { touchSpawnOk: failures.length === 0, failures };
 }
 

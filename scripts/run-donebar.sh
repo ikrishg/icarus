@@ -11,8 +11,8 @@ SUMMARY=/tmp/donebar-summary.tsv
 echo -e "run\tpass\tl15\tfirstEntryMs\texit" > "$SUMMARY"
 
 cleanup_browser() {
-  pkill -f "chrome-headless-shell|chromium.*headless" 2>/dev/null || true
-  sleep 10
+  pkill -9 -f "chrome-headless-shell|chromium.*headless|ms-playwright" 2>/dev/null || true
+  sleep 15
 }
 
 summarize() {
