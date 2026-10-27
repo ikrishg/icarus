@@ -236,11 +236,16 @@ export class Play extends Scene {
 				return track?.samples ?? [];
 			};
 			window.__icarusIsTouchSpawnLayoutSettled = () => {
-				if (this.isTouchSpawnLayoutSettled()) {
-					this.reconcileTouchSpawnSpriteWithExpected();
-					return true;
+				if (!this.isTouchSpawnLayoutSettled()) {
+					return false;
 				}
-				return false;
+				if (this.touchControls?.visible && this.player?.sprite?.body) {
+					const want = this.touchSpawnExpectedAtCurrentLayout();
+					if (Math.abs(this.player.sprite.x - want.x) > 4) {
+						this.applyTouchSpawnSpriteCoords(want);
+					}
+				}
+				return true;
 			};
 			window.__icarusTouchSpawnDiagnostics = () => {
 				const sprite = this.player?.sprite;
@@ -310,11 +315,7 @@ export class Play extends Scene {
 							!this.pendingTouchDeathRespawn
 						) {
 							const want = this.touchSpawnExpectedAtCurrentLayout();
-							this.player.revive(want.x, want.y);
-							this.lastTouchSpawnPlacement = {
-								x: want.x,
-								y: want.y,
-							};
+							this.applyTouchSpawnSpriteCoords(want);
 						}
 						this.setupLevelColliders();
 						this.reconcileTouchSpawnSpriteWithExpected();
@@ -431,14 +432,6 @@ export class Play extends Scene {
 				this.applyTouchRespawnAtCurrentLayout();
 			}
 			this.lastWindowAspectPortrait = aspectPortrait;
-			if (
-				this.isTouchSpawnLayoutSettled() &&
-				!this.isResetting &&
-				this.player &&
-				!this.player.isDead
-			) {
-				this.reconcileTouchSpawnSpriteWithExpected();
-			}
 		}
 		if (isTouchDevice(this)) {
 			if (
@@ -1052,6 +1045,15 @@ export class Play extends Scene {
 		}
 	}
 
+	private applyTouchSpawnSpriteCoords(want: { x: number; y: number }): void {
+		const sprite = this.player!.sprite;
+		const body = sprite.body as Phaser.Physics.Arcade.Body;
+		sprite.setPosition(want.x, want.y);
+		body.updateFromGameObject();
+		body.setVelocity(0, 0);
+		this.lastTouchSpawnPlacement = { x: want.x, y: want.y };
+	}
+
 	/** Snap sprite to expected touch spawn when layout settled but position is stale. */
 	private reconcileTouchSpawnSpriteWithExpected(): void {
 		if (
@@ -1060,6 +1062,20 @@ export class Play extends Scene {
 			this.player.isDead ||
 			this.isResetting
 		) {
+			return;
+		}
+		if (
+			this.isPaused ||
+			this.portraitBlockerPauseActive ||
+			isPortraitBlockerActive()
+		) {
+			return;
+		}
+		if (this.pendingTouchDeathRespawn || this.pendingTouchLandscapeSpawn) {
+			return;
+		}
+		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
+		if (!body.blocked.down && Math.abs(body.velocity.y) > 24) {
 			return;
 		}
 		if (this.touchResizePreservesPlayerProgress()) {
@@ -1076,17 +1092,14 @@ export class Play extends Scene {
 			placed != null &&
 			Math.abs(px - placed.x) <= tol &&
 			Math.abs(placed.x - want.x) > tol;
-		if (!staleLayoutSpawn && this.playerAwayFromTouchSpawnBand()) {
-			if (
-				placed != null ||
-				this.touchResizePreservesPlayerProgress() ||
-				Math.abs(px - want.x) <= tol
-			) {
-				return;
-			}
+		const nearSpawnBand =
+			Math.abs(px - want.x) <= 96 ||
+			staleLayoutSpawn ||
+			placed == null;
+		if (!nearSpawnBand && this.playerAwayFromTouchSpawnBand()) {
+			return;
 		}
-		this.player.revive(want.x, want.y);
-		this.lastTouchSpawnPlacement = { x: want.x, y: want.y };
+		this.applyTouchSpawnSpriteCoords(want);
 	}
 
 	private syncPlayerToTouchSpawnAtCurrentLayout(): void {
