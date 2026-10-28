@@ -3268,7 +3268,9 @@ async function runTouchDeathSpawnStableDuringRise(baseUrl) {
 		await waitForPlayReady(page, 20000);
 		await page.evaluate(() => {
 			window.__icarusBeginDeathSpawnXTrack?.();
-			window.__icarusGame?.scene.getScene('Play')?.killPlayer('spikes');
+			window.__icarusGame?.scene
+				.getScene('Play')
+				?.killPlayer('spikes', { spendLife: false });
 		});
 		await page.waitForFunction(
 			() => {
