@@ -3,18 +3,41 @@ import { AbilityManager } from '../components/AbilityManager';
 import { BackgroundManager } from '../components/Background';
 import { LevelManager } from '../components/LevelManager';
 import { Player } from '../components/Player';
-import { TouchControls } from '../components/TouchControls';
+import { isTouchDevice, TouchControls } from '../components/TouchControls';
 import type { PlayerAbilities } from '../util/types';
-import { DEPTH_PLAY_HUD_TEXT, PLAY_HUD_CLEARANCE_Y } from '../util/constants';
+import {
+	DEPTH_PLAY_HUD_TEXT,
+	HEIGHT,
+	PLAY_HUD_CLEARANCE_Y,
+	WIDTH,
+} from '../util/constants';
 import { DeathSequence, type DeathCause } from '../components/DeathSequence';
-import { isDebugPlayEnabled } from '../util/debug';
 import {
 	ABILITY_LOSS_LINE,
 	ABILITY_MYTH_NAME,
 	abilityStateLine,
 	regainLevelTitle,
 } from '../util/abilityCopy';
-import { PALETTE_HEX } from '../util/palette';
+import { PALETTE, PALETTE_HEX } from '../util/palette';
+import { touchFontSizeStyle } from '../util/responsiveText';
+import {
+	isPortraitBlockerActive,
+	PORTRAIT_BLOCKER_MEDIA,
+} from '../util/portraitBlocker';
+import {
+	touchChromeMetrics,
+	touchInstructionPanelCenterY,
+} from '../util/touchLayout';
+import {
+	clearanceToHazards,
+	hazardIntervalsForLevel,
+	spriteOverlapsButtons,
+	TOUCH_HAZARD_MARGIN_PX,
+	type ButtonRect,
+} from '../util/touchSafeX';
+
+import { isDebugPlayEnabled } from '../util/debug';
+
 import { sanitizePixelFont } from '../util/text';
 
 const ABILITY_CARD_FILL = 0xd6c9b6;
@@ -42,6 +65,7 @@ function abilityCardPosition(
 	startY: number,
 	boxSize: number,
 	spacing: number,
+	rowHeight: number = boxSize,
 ): { x: number; y: number } {
 	const col = index % cols;
 	const row = Math.floor(index / cols);
@@ -55,22 +79,27 @@ function abilityCardPosition(
 	);
 	return {
 		x: startX + col * (boxSize + spacing),
-		y: startY + row * (boxSize + spacing),
+		y: startY + row * (rowHeight + spacing),
 	};
 }
 
 function addAbilityIcon(
 	scene: Scene,
 	x: number,
-	y: number,
+	cardTop: number,
+	cardHeight: number,
 	textureKey: string,
 ): Phaser.GameObjects.Image {
 	const frame = scene.textures.get(textureKey).get();
+	const iconArea = Math.min(ABILITY_ICON_MAX, Math.max(48, cardHeight * 0.2));
 	const scale = Math.min(
-		ABILITY_ICON_MAX / frame.width,
-		ABILITY_ICON_MAX / frame.height,
+		iconArea / frame.width,
+		iconArea / frame.height,
 	);
-	return scene.add.image(x, y - 40, textureKey).setScale(scale).setDepth(22);
+	const scaledH = frame.height * scale;
+	const padTop = 12;
+	const centerY = cardTop + padTop + scaledH / 2;
+	return scene.add.image(x, centerY, textureKey).setScale(scale).setDepth(22);
 }
 
 function styleAbilityCard(
@@ -106,7 +135,25 @@ export class Play extends Scene {
 	private skipKeyHandler?: () => void;
 	private pausePanel?: Phaser.GameObjects.Container;
 	private isPaused = false;
+	private portraitBlockerPauseActive = false;
+	private pendingTouchLandscapeSpawn = false;
+	/** Death respawn still needs landscape touch spawn (not cached at death/onRebuild). */
+	private pendingTouchDeathRespawn = false;
+	private portraitMediaActive = false;
+	private lastWindowAspectPortrait = false;
 	private runEndedOnDeath = false;
+	private resizePushGeneration = 0;
+	private resizePushTimer?: Phaser.Time.TimerEvent;
+	/** QA prepareLevel: defer fireball timers until touch spawn layout settles. */
+	suppressFireballClockCommit = false;
+	private touchSpawnLayoutEpoch = 0;
+	private touchSpawnLayoutEpochDone = 0;
+	private touchSpawnSettledAtFrame = 0;
+	private lastTouchSpawnPlacement: { x: number; y: number } | null = null;
+	/** While true, always snap player to touch spawn (QA prepareLevel). */
+	private preparingTouchLevelForQa = false;
+	/** Landscape resize during touch death reset; reconcile once when respawn finishes. */
+	private touchDeathMidResizePendingReconcile = false;
 
 	constructor() {
 		super('Play');
@@ -142,6 +189,17 @@ export class Play extends Scene {
 
 		this.touchControls = new TouchControls(this);
 		this.player.touchControls = this.touchControls;
+		this.touchControls.setTopBarHandlers(
+			() => this.requestPause(),
+			() => {
+				if (!this.isResetting && !this.isPaused) {
+					this.killPlayer('fall', { fast: true, spendLife: false });
+				}
+			},
+		);
+		this.physics.world.setBounds(0, 0, WIDTH, HEIGHT);
+		this.physics.world.setBoundsCollision(true, true, false, true);
+		this.physics.world.on('poststep', this.clampPlayerToWorldSides, this);
 
 		// Create vision overlay
 		this.visionOverlay = this.add
@@ -153,14 +211,117 @@ export class Play extends Scene {
 				0x000000,
 			)
 			.setOrigin(0, 0)
-			.setDepth(100)
+			.setDepth(19)
 			.setAlpha(this.abilityManager.getVisionAlpha());
 
 		this.setupLevelColliders();
+		const spawn = this.resolveTouchSpawnPlacement();
+		this.player.setPosition(spawn.x, spawn.y);
 		this.deathSequence = new DeathSequence(this, this.player);
 		this.createLivesHud();
 		window.__icarusGetColliders = () => this.colliders.length;
 		window.__icarusGetLives = () => this.lives;
+		if (import.meta.env.DEV || import.meta.env.VITE_ENABLE_QA_HOOKS === 'true') {
+			window.__icarusTouchChromeMetrics = () => touchChromeMetrics(this);
+			window.__icarusBeginDeathSpawnXTrack = () => {
+				window.__icarusDeathSpawnXTrack = {
+					active: true,
+					revived: false,
+					samples: [],
+				};
+			};
+			window.__icarusEndDeathSpawnXTrack = () => {
+				const track = window.__icarusDeathSpawnXTrack;
+				if (track) {
+					track.active = false;
+				}
+				return track?.samples ?? [];
+			};
+			window.__icarusIsTouchSpawnLayoutSettled = () =>
+				this.isTouchSpawnLayoutSettled();
+			window.__icarusTouchSpawnDiagnostics = () => {
+				const sprite = this.player?.sprite;
+				const want = this.touchSpawnExpectedAtCurrentLayout();
+				return {
+					settled: this.isTouchSpawnLayoutSettled(),
+					epoch: this.touchSpawnLayoutEpoch,
+					epochDone: this.touchSpawnLayoutEpochDone,
+					framesSinceResizeSettle:
+						this.game.loop.frame - this.touchSpawnSettledAtFrame,
+					spawnX: sprite?.x ?? null,
+					spawnY: sprite?.y ?? null,
+					wantX: want.x,
+					wantY: want.y,
+					layoutScale: this.touchControls?.getLayoutScale?.() ?? null,
+				};
+			};
+			window.__icarusPrepareLevel = (levelIndex: number) => {
+				try {
+					if (!this.scene?.isActive() || !this.player || !this.physics?.world) {
+						return false;
+					}
+					const world = this.physics.world;
+					const wasPaused = world.isPaused;
+					try {
+						this.clearLevelInstruction();
+						this.clearColliders();
+						this.lastTouchSpawnPlacement = null;
+						this.resizePushTimer?.remove(false);
+						this.resizePushGeneration++;
+						this.levelManager.firstFireballSpawnOffsetMs = null;
+						this.isResetting = false;
+						this.pendingTouchLandscapeSpawn = false;
+						this.pendingTouchDeathRespawn = false;
+						this.player.isDead = false;
+						this.player.controlsEnabled = true;
+						this.suppressFireballClockCommit = true;
+						this.levelManager.goto(levelIndex);
+						this.levelManager.setFireballTimersPaused(true);
+						this.refreshTouchSpawnLayout();
+						world.resume();
+						const spawn = this.resolveTouchSpawnPlacement();
+						this.player.revive(spawn.x, spawn.y);
+						if (this.touchControls?.visible) {
+							this.repositionTouchSpawnIfOverlappingButtons();
+						}
+						this.portraitBlockerPauseActive = false;
+						this.isPaused = false;
+						this.time.paused = false;
+						this.time.timeScale = this.gameplayTimeScale || 1;
+						this.tweens.resumeAll();
+						if (this.physics.world.isPaused) {
+							this.physics.world.resume();
+						}
+						this.suppressFireballClockCommit = false;
+						this.levelManager.syncFireballSpawnClock();
+						this.levelManager.setFireballTimersPaused(false);
+						this.syncPortraitBlockerPause();
+						this.preparingTouchLevelForQa = true;
+						this.handleDisplayResize();
+						if (
+							!this.pendingTouchDeathRespawn &&
+							this.touchControls?.visible &&
+							isTouchDevice(this)
+						) {
+							const spawn = this.resolveTouchSpawnPlacement(false);
+							this.applyTouchSpawnSpriteCoords(spawn);
+						}
+						this.setupLevelColliders();
+						this.reconcileTouchSpawnSpriteWithExpected();
+						this.resizePushTimer?.remove(false);
+						this.resizePushGeneration++;
+						this.preparingTouchLevelForQa = false;
+						return true;
+					} finally {
+						if (wasPaused) {
+							world.pause();
+						}
+					}
+				} catch {
+					return false;
+				}
+			};
+		}
 		this.playBattleMusic();
 		this.showLevelInstruction();
 
@@ -171,11 +332,29 @@ export class Play extends Scene {
 		});
 
 		this.escKeyHandler = () => {
-			if (this.deathSequence?.isEscBlocked()) return;
-			if (this.isResetting) return;
-			this.togglePause();
+			this.requestPause();
 		};
 		this.input.keyboard?.on('keydown-ESC', this.escKeyHandler);
+
+		if (isTouchDevice(this) && typeof window !== 'undefined') {
+			const blockerMq = window.matchMedia(PORTRAIT_BLOCKER_MEDIA);
+			const onBlockerChange = () => this.syncPortraitBlockerPause();
+			if (typeof blockerMq.addEventListener === 'function') {
+				blockerMq.addEventListener('change', onBlockerChange);
+			} else if (typeof blockerMq.addListener === 'function') {
+				blockerMq.addListener(onBlockerChange);
+			}
+			this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+				if (typeof blockerMq.removeEventListener === 'function') {
+					blockerMq.removeEventListener('change', onBlockerChange);
+				} else if (typeof blockerMq.removeListener === 'function') {
+					blockerMq.removeListener(onBlockerChange);
+				}
+			});
+			this.portraitMediaActive = isPortraitBlockerActive();
+			this.lastWindowAspectPortrait = this.windowAspectIsPortrait();
+			this.syncPortraitBlockerPause();
+		}
 
 		if (isDebugPlayEnabled()) {
 			this.skipKeyHandler = () => {
@@ -203,6 +382,7 @@ export class Play extends Scene {
 		this.resetRunState();
 		this.clearLevelInstruction();
 		this.clearColliders();
+		this.physics.world.off('poststep', this.clampPlayerToWorldSides, this);
 		this.touchControls?.destroy();
 		if (this.escKeyHandler) {
 			this.input.keyboard?.off('keydown-ESC', this.escKeyHandler);
@@ -215,9 +395,57 @@ export class Play extends Scene {
 		}
 		delete window.__icarusGetColliders;
 		delete window.__icarusGetLives;
+		delete window.__icarusPrepareLevel;
+		delete window.__icarusTouchChromeMetrics;
 	}
 
 	update() {
+		const deathSpawnTrack = window.__icarusDeathSpawnXTrack;
+		if (
+			deathSpawnTrack?.active &&
+			deathSpawnTrack.revived &&
+			this.isResetting &&
+			this.player?.sprite
+		) {
+			deathSpawnTrack.samples.push(this.player.sprite.x);
+		}
+		if (isTouchDevice(this) && this.touchControls?.visible) {
+			const aspectPortrait = this.windowAspectIsPortrait();
+			if (
+				this.pendingTouchDeathRespawn &&
+				this.lastWindowAspectPortrait &&
+				!aspectPortrait &&
+				this.player &&
+				!this.player.isDead
+			) {
+				this.applyTouchRespawnAtCurrentLayout();
+			}
+			this.lastWindowAspectPortrait = aspectPortrait;
+		}
+		if (isTouchDevice(this)) {
+			if (
+				isPortraitBlockerActive() &&
+				!this.pausePanel &&
+				!this.isResetting &&
+				!this.deathSequence?.isEscBlocked()
+			) {
+				if (!this.portraitBlockerPauseActive) {
+					this.portraitBlockerPauseActive = true;
+				}
+				this.isPaused = true;
+				if (!this.physics.world.isPaused) {
+					this.physics.pause();
+				}
+				this.setGameplayClockPaused(true);
+			} else if (
+				this.portraitBlockerPauseActive ||
+				(this.isPaused &&
+					!this.pausePanel &&
+					!isPortraitBlockerActive())
+			) {
+				this.syncPortraitBlockerPause();
+			}
+		}
 		if (this.isPaused) return;
 		if (this.deathSequence?.consumeJumpBuffer()) {
 			const maxJumps = this.abilityManager.getMaxJumps();
@@ -282,6 +510,8 @@ export class Play extends Scene {
 	) {
 		if (!this.player || this.player.isDead || this.isResetting) return;
 		if (!this.deathSequence) return;
+		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body | null;
+		if (!body) return;
 
 		const fast = options.fast === true;
 		const spendLife = options.spendLife !== false;
@@ -289,12 +519,44 @@ export class Play extends Scene {
 		this.clearLevelInstruction();
 		this.setGameplayHudVisible(false);
 		this.isResetting = true;
+		this.touchDeathMidResizePendingReconcile = false;
+		this.resizePushTimer?.remove(false);
+		this.resizePushGeneration++;
+		this.levelManager.setFireballTimersPaused(true);
+		this.time.paused = false;
+		this.time.timeScale = this.gameplayTimeScale || 1;
 		this.sound.play('death', { volume: 0.6 });
 
 		this.runEndedOnDeath = false;
 		const finishDeath = () => {
+			this.relayoutTouchChromeHud();
 			this.setGameplayHudVisible(true);
-			this.isResetting = false;
+			this.endLevelTransitionReset();
+			if (this.touchDeathMidResizePendingReconcile) {
+				this.touchDeathMidResizePendingReconcile = false;
+				if (
+					this.touchControls?.visible &&
+					this.player?.sprite?.body &&
+					!this.player.isDead
+				) {
+					this.applyTouchSpawnSpriteCoords(
+						this.touchSpawnExpectedAtCurrentLayout(),
+					);
+				}
+			}
+			if (isPortraitBlockerActive()) {
+				this.portraitBlockerPauseActive = true;
+				this.isPaused = true;
+				if (!this.physics.world.isPaused) {
+					this.physics.pause();
+				}
+				this.setGameplayClockPaused(true);
+			} else if (!this.pausePanel) {
+				this.isPaused = false;
+				this.physics.resume();
+				this.setGameplayClockPaused(false);
+			}
+			this.syncPortraitBlockerPause();
 			if (this.runEndedOnDeath) {
 				this.scene.start('Dead');
 			}
@@ -317,6 +579,12 @@ export class Play extends Scene {
 				this.restartCurrentLevel();
 			},
 			onComplete: () => {
+				if (this.player) {
+					this.player.controlsEnabled = true;
+				}
+				if (this.pendingTouchDeathRespawn) {
+					this.applyTouchRespawnAtCurrentLayout();
+				}
 				finishDeath();
 			},
 		});
@@ -331,16 +599,52 @@ export class Play extends Scene {
 		if (!this.player) return;
 
 		const levelIndex = this.levelManager.currentIndex;
+		this.lastTouchSpawnPlacement = null;
 		this.clearLevelInstruction();
 		this.clearColliders();
 		this.levelManager.goto(levelIndex);
-		this.player.revive(
-			this.levelManager.current.start.x,
-			this.levelManager.current.start.y,
-		);
+		this.refreshTouchSpawnLayout();
+		let spawnPos: { x: number; y: number };
+		if (
+			this.isResetting &&
+			isTouchDevice(this) &&
+			this.touchControls?.visible
+		) {
+			this.scale.refresh();
+			if (this.touchDeathSpawnLayoutDeferred()) {
+				this.pendingTouchDeathRespawn = true;
+				const start = this.levelManager.current.start;
+				spawnPos = { x: start.x, y: start.y };
+			} else {
+				this.pendingTouchDeathRespawn = false;
+				spawnPos = this.resolveTouchSpawnPlacement();
+			}
+		} else {
+			spawnPos = this.resolveTouchSpawnPlacement();
+		}
+		this.player.revive(spawnPos.x, spawnPos.y);
+		if (this.touchControls?.visible && !this.pendingTouchDeathRespawn) {
+			this.repositionTouchSpawnIfOverlappingButtons();
+			this.lastTouchSpawnPlacement = spawnPos;
+		}
+		const deathSpawnTrack = window.__icarusDeathSpawnXTrack;
+		if (deathSpawnTrack?.active && this.isResetting) {
+			deathSpawnTrack.revived = true;
+		}
 		this.setupLevelColliders();
+		this.relayoutTouchChromeHud();
 		this.showLevelInstruction();
 		this.playBattleMusic();
+		this.syncTouchLandscapeSpawnIfNeeded();
+		if (this.isResetting) {
+			this.levelManager.setFireballTimersPaused(true);
+		}
+		this.touchSpawnLayoutEpoch++;
+		if (!this.pendingTouchDeathRespawn) {
+			this.syncPlayerToTouchSpawnAtCurrentLayout();
+		}
+		this.touchSpawnLayoutEpochDone = this.touchSpawnLayoutEpoch;
+		this.touchSpawnSettledAtFrame = this.game.loop.frame;
 	}
 
 	clearLevelInstruction() {
@@ -361,6 +665,15 @@ export class Play extends Scene {
 			collider.destroy();
 		}
 		this.colliders = [];
+	}
+
+	/** Clears portal/ability reset gate and resumes deferred fireball schedule. */
+	private endLevelTransitionReset(): void {
+		this.isResetting = false;
+		if (this.levelManager.deferLevelClockReset) {
+			this.levelManager.deferLevelClockReset = false;
+			this.levelManager.syncFireballSpawnClock();
+		}
 	}
 
 	completeLevel() {
@@ -408,13 +721,14 @@ export class Play extends Scene {
 				this.resetPlayer();
 				this.playBattleMusic();
 				this.showLevelInstruction();
-				this.isResetting = false;
+				this.endLevelTransitionReset();
+				this.syncPortraitBlockerPause();
 			}
 		});
 	}
 
 	showWinScreen() {
-		this.isResetting = false;
+		this.endLevelTransitionReset();
 		this.levelManager.goto(0);
 		this.resetPlayer();
 		this.scene.switch('Win', { giftsLost: this.giftsLost });
@@ -499,21 +813,465 @@ export class Play extends Scene {
 		}
 	}
 
+	private touchGameplayButtons(): ButtonRect[] {
+		return [
+			...(this.touchControls?.getLeftMovementButtonBounds?.() ?? []),
+			...(this.touchControls?.getGameplayButtonBounds?.() ?? []),
+		];
+	}
+
+	private touchSpawnHazardMarginAt(centerX: number, spawnY: number): number {
+		const sprite = this.player.sprite;
+		const prevX = sprite.x;
+		const prevY = sprite.y;
+		sprite.setPosition(centerX, spawnY);
+		const body = sprite.body as Phaser.Physics.Arcade.Body | null;
+		body?.updateFromGameObject();
+		const b = sprite.getBounds();
+		sprite.setPosition(prevX, prevY);
+		body?.updateFromGameObject();
+		const hazards = hazardIntervalsForLevel(
+			this.levelManager.current,
+			spawnY,
+		);
+		return clearanceToHazards(
+			{ left: b.left, right: b.right },
+			hazards,
+		);
+	}
+
+	private touchSpawnOverlapsButtonsAt(
+		centerX: number,
+		spawnY: number,
+		buttons: ButtonRect[],
+	): boolean {
+		const sprite = this.player.sprite;
+		const prevX = sprite.x;
+		const prevY = sprite.y;
+		sprite.setPosition(centerX, spawnY);
+		const body = sprite.body as Phaser.Physics.Arcade.Body | null;
+		body?.updateFromGameObject();
+		const b = sprite.getBounds();
+		sprite.setPosition(prevX, prevY);
+		body?.updateFromGameObject();
+		const playerRect = {
+			left: b.left,
+			right: b.right,
+			top: b.top,
+			bottom: b.bottom,
+		};
+		return buttons.some(
+			(btn) =>
+				playerRect.left < btn.right - 0.5 &&
+				playerRect.right > btn.left + 0.5 &&
+				playerRect.top < btn.bottom &&
+				playerRect.bottom > btn.top,
+		);
+	}
+
+	private touchSpawnBlockedAt(x: number, y: number): boolean {
+		const prevX = this.player.sprite.x;
+		const prevY = this.player.sprite.y;
+		this.player.sprite.setPosition(x, y);
+		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
+		body.updateFromGameObject();
+		let blocked = false;
+		const playerBounds = this.player.sprite.getBounds();
+		const footTop = playerBounds.bottom - Math.min(32, playerBounds.height * 0.35);
+		for (const child of this.levelManager.platforms.getChildren()) {
+			const platBody = (child as Phaser.GameObjects.GameObject).body as
+				| Phaser.Physics.Arcade.StaticBody
+				| undefined;
+			if (!platBody || platBody.width >= 1800) continue;
+			if (
+				playerBounds.right > platBody.left &&
+				playerBounds.left < platBody.right &&
+				playerBounds.bottom > platBody.top &&
+				footTop < platBody.bottom
+			) {
+				blocked = true;
+				break;
+			}
+		}
+		this.player.sprite.setPosition(prevX, prevY);
+		body.updateFromGameObject();
+		return blocked;
+	}
+
+	refreshTouchSpawnLayout(): void {
+		if (!this.touchControls?.visible) return;
+		this.touchControls.resetLayoutScale();
+		this.touchControls.relayout();
+	}
+
+	private touchSpawnSearchMaxX(spriteHalfW: number): number {
+		const start = this.levelManager.current.start;
+		const clusterMin = this.touchControls!.getMinSpawnX(spriteHalfW);
+		const maxDelta = Math.max(
+			72,
+			clusterMin - start.x,
+			clusterMin + 72 - start.x,
+		);
+		const boundMax = Math.min(
+			WIDTH - spriteHalfW,
+			Math.max(start.x + maxDelta, clusterMin + 72),
+		);
+		return Math.min(boundMax, this.touchSpawnHazardMaxCenterX(spriteHalfW, start.y));
+	}
+
+	private touchSpawnHazardMaxCenterX(
+		spriteHalfW: number,
+		spawnY: number,
+	): number {
+		let maxX = WIDTH - spriteHalfW;
+		for (const h of hazardIntervalsForLevel(
+			this.levelManager.current,
+			spawnY,
+		)) {
+			const capped = h.left - TOUCH_HAZARD_MARGIN_PX - spriteHalfW;
+			maxX = Math.min(maxX, capped);
+		}
+		return maxX;
+	}
+
+	/** Match QA spawn hazard readout (getBounds + floor ≥ 96px). */
+	private touchSpawnMeetsQaHazardMargin(centerX: number, spawnY: number): boolean {
+		return (
+			Math.floor(this.touchSpawnHazardMarginAt(centerX, spawnY)) >=
+			TOUCH_HAZARD_MARGIN_PX
+		);
+	}
+
+	private snapTouchSpawnForQaHazardMargin(
+		pos: { x: number; y: number },
+		clusterMin: number,
+	): { x: number; y: number } {
+		const start = this.levelManager.current.start;
+		for (let tx = Math.round(pos.x); tx >= clusterMin; tx -= 2) {
+			if (this.touchSpawnMeetsQaHazardMargin(tx, start.y)) {
+				return { x: tx, y: start.y };
+			}
+		}
+		return pos;
+	}
+
+	private pickTouchSpawnAtCurrentLayout(): { x: number; y: number } | null {
+		const start = this.levelManager.current.start;
+		if (!this.touchControls?.visible || !this.player?.sprite?.body) {
+			return null;
+		}
+		const ledgeBlocked = (tx: number) =>
+			this.touchSpawnBlockedAt(tx, start.y);
+		const sprB = this.player.sprite.getBounds();
+		const spriteHalfW = (sprB.right - sprB.left) / 2;
+		const clusterMin = this.touchControls.getMinSpawnX(spriteHalfW);
+		const maxX = this.touchSpawnSearchMaxX(spriteHalfW);
+		if (maxX < clusterMin) {
+			return null;
+		}
+		const buttons = this.touchGameplayButtons();
+		for (let tx = clusterMin; tx <= maxX; tx += 2) {
+			if (ledgeBlocked(tx)) continue;
+			if (!this.touchSpawnMeetsQaHazardMargin(tx, start.y)) continue;
+			if (this.touchSpawnOverlapsButtonsAt(tx, start.y, buttons)) {
+				continue;
+			}
+			return this.snapTouchSpawnForQaHazardMargin(
+				{ x: Math.round(tx), y: start.y },
+				clusterMin,
+			);
+		}
+		return null;
+	}
+
+	private touchSpawnFallbackPosition(): { x: number; y: number } {
+		const start = this.levelManager.current.start;
+		const sprB = this.player.sprite.getBounds();
+		const spriteHalfW = (sprB.right - sprB.left) / 2;
+		const clusterMin = this.touchControls!.getMinSpawnX(spriteHalfW);
+		const maxX = this.touchSpawnSearchMaxX(spriteHalfW);
+		const ledgeBlocked = (tx: number) =>
+			this.touchSpawnBlockedAt(tx, start.y);
+		const buttons = this.touchGameplayButtons();
+		if (maxX < clusterMin) {
+			if (
+				!ledgeBlocked(maxX) &&
+				this.touchSpawnMeetsQaHazardMargin(maxX, start.y) &&
+				!this.touchSpawnOverlapsButtonsAt(maxX, start.y, buttons)
+			) {
+				return { x: Math.round(maxX), y: start.y };
+			}
+			return { x: start.x, y: start.y };
+		}
+		for (let tx = clusterMin; tx <= maxX; tx += 2) {
+			if (ledgeBlocked(tx)) continue;
+			if (!this.touchSpawnMeetsQaHazardMargin(tx, start.y)) continue;
+			if (this.touchSpawnOverlapsButtonsAt(tx, start.y, buttons)) {
+				continue;
+			}
+			return this.snapTouchSpawnForQaHazardMargin(
+				{ x: Math.round(tx), y: start.y },
+				clusterMin,
+			);
+		}
+		return { x: start.x, y: start.y };
+	}
+
+	isTouchSpawnLayoutSettled(): boolean {
+		if (this.touchSpawnLayoutEpochDone !== this.touchSpawnLayoutEpoch) {
+			return false;
+		}
+		if (
+			import.meta.env.VITE_ENABLE_QA_HOOKS === 'true' &&
+			this.touchControls?.visible &&
+			this.player?.sprite?.body &&
+			isTouchDevice(this)
+		) {
+			const want = this.touchSpawnExpectedAtCurrentLayout();
+			return Math.abs(this.player.sprite.x - Math.round(want.x)) <= 4;
+		}
+		return true;
+	}
+
+	private touchSpawnCoordsAtCurrentLayoutScale(): { x: number; y: number } {
+		const start = this.levelManager.current.start;
+		if (!this.touchControls?.visible || !this.player?.sprite?.body) {
+			return { x: start.x, y: start.y };
+		}
+		const pos =
+			this.pickTouchSpawnAtCurrentLayout() ??
+			this.touchSpawnFallbackPosition();
+		return this.finalizeTouchSpawnCoords(pos);
+	}
+
+	private ensureTouchSpawnLayoutFits(): void {
+		if (!this.touchControls?.visible || !this.player?.sprite?.body) {
+			return;
+		}
+		for (let attempt = 0; attempt < 36; attempt++) {
+			if (this.pickTouchSpawnAtCurrentLayout()) {
+				return;
+			}
+			if (!this.touchControls.shrinkLayoutStep()) {
+				break;
+			}
+			this.touchControls.relayout();
+		}
+	}
+
+	private applyTouchSpawnSpriteCoords(want: { x: number; y: number }): void {
+		if (import.meta.env.VITE_NOSNAP_PROOF === 'true') {
+			return;
+		}
+		const sprite = this.player!.sprite;
+		const body = sprite.body as Phaser.Physics.Arcade.Body;
+		sprite.setPosition(want.x, want.y);
+		body.updateFromGameObject();
+		body.setVelocity(0, 0);
+		this.lastTouchSpawnPlacement = { x: want.x, y: want.y };
+	}
+
+	/** Snap sprite to expected touch spawn when layout settled but position is stale. */
+	private reconcileTouchSpawnSpriteWithExpected(): void {
+		if (import.meta.env.VITE_NOSNAP_PROOF === 'true') {
+			return;
+		}
+		if (this.preparingTouchLevelForQa) {
+			if (this.touchControls?.visible && this.player?.sprite?.body) {
+				this.applyTouchSpawnSpriteCoords(
+					this.touchSpawnExpectedAtCurrentLayout(),
+				);
+			}
+			return;
+		}
+		if (
+			!this.touchControls?.visible ||
+			!this.player?.sprite?.body ||
+			this.player.isDead ||
+			this.isResetting
+		) {
+			return;
+		}
+		if (
+			this.isPaused ||
+			this.portraitBlockerPauseActive ||
+			isPortraitBlockerActive()
+		) {
+			return;
+		}
+		if (this.pendingTouchDeathRespawn || this.pendingTouchLandscapeSpawn) {
+			return;
+		}
+		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
+		if (!body.blocked.down && Math.abs(body.velocity.y) > 24) {
+			return;
+		}
+		if (this.touchResizePreservesPlayerProgress()) {
+			return;
+		}
+		const want = this.touchSpawnExpectedAtCurrentLayout();
+		const tol = 4;
+		const px = this.player.sprite.x;
+		if (Math.abs(px - want.x) <= tol) {
+			return;
+		}
+		const placed = this.lastTouchSpawnPlacement;
+		const staleLayoutSpawn =
+			placed != null &&
+			Math.abs(px - placed.x) <= tol &&
+			Math.abs(placed.x - want.x) > tol;
+		const nearWant = Math.abs(px - want.x) <= 96;
+		const nearSpawnBand =
+			staleLayoutSpawn ||
+			(nearWant && !this.playerAwayFromTouchSpawnBand());
+		if (!nearSpawnBand && this.playerAwayFromTouchSpawnBand()) {
+			return;
+		}
+		this.applyTouchSpawnSpriteCoords(want);
+	}
+
+	private syncPlayerToTouchSpawnAtCurrentLayout(): void {
+		if (import.meta.env.VITE_NOSNAP_PROOF === 'true') {
+			return;
+		}
+		if (
+			!this.touchControls?.visible ||
+			!this.player?.sprite?.body ||
+			this.player.isDead
+		) {
+			return;
+		}
+		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
+		if (!body.blocked.down && Math.abs(body.velocity.y) > 24) {
+			return;
+		}
+		if (
+			!this.preparingTouchLevelForQa &&
+			(this.playerAwayFromTouchSpawnBand() ||
+				this.touchResizePreservesPlayerProgress())
+		) {
+			return;
+		}
+		this.resizePushTimer?.remove(false);
+		this.resizePushGeneration++;
+		this.resolveTouchSpawnPlacement(false);
+	}
+
+	private resetPlayerToLevelStartForSpawnPick(): void {
+		const start = this.levelManager.current.start;
+		const sprite = this.player!.sprite;
+		sprite.setPosition(start.x, start.y);
+		const body = sprite.body as Phaser.Physics.Arcade.Body;
+		body.updateFromGameObject();
+	}
+
+	resolveTouchSpawnPlacement(refreshLayout = true): { x: number; y: number } {
+		const start = this.levelManager.current.start;
+		if (!this.touchControls?.visible || !this.player?.sprite?.body) {
+			return { x: start.x, y: start.y };
+		}
+		if (refreshLayout) {
+			this.refreshTouchSpawnLayout();
+		}
+		this.resetPlayerToLevelStartForSpawnPick();
+		this.ensureTouchSpawnLayoutFits();
+		const out = this.touchSpawnCoordsAtCurrentLayoutScale();
+		this.player.sprite.setPosition(out.x, out.y);
+		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
+		body.updateFromGameObject();
+		this.lastTouchSpawnPlacement = out;
+		return out;
+	}
+
+	private finalizeTouchSpawnCoords(pos: { x: number; y: number }): {
+		x: number;
+		y: number;
+	} {
+		const start = this.levelManager.current.start;
+		const sprB = this.player!.sprite.getBounds();
+		const spriteHalfW = (sprB.right - sprB.left) / 2;
+		const clusterMin = this.touchControls!.getMinSpawnX(spriteHalfW);
+		const snapped = this.snapTouchSpawnForQaHazardMargin(pos, clusterMin);
+		let out = snapped;
+		for (let pass = 0; pass < 8; pass++) {
+			out.x = Math.max(out.x, clusterMin);
+			if (this.touchSpawnMeetsQaHazardMargin(out.x, start.y)) {
+				return { x: out.x, y: start.y };
+			}
+			const nextX = out.x - 2;
+			if (nextX < clusterMin) {
+				break;
+			}
+			out = { x: nextX, y: start.y };
+		}
+		const clamped = Math.max(out.x, clusterMin);
+		if (this.touchSpawnMeetsQaHazardMargin(clamped, start.y)) {
+			return { x: clamped, y: start.y };
+		}
+		const fallback = Math.max(start.x, clusterMin);
+		if (this.touchSpawnMeetsQaHazardMargin(fallback, start.y)) {
+			return { x: fallback, y: start.y };
+		}
+		return { x: start.x, y: start.y };
+	}
+
+	/** Read-only expected spawn at current touch layout (matches resolve). */
+	touchSpawnExpectedAtCurrentLayout(): { x: number; y: number } {
+		const start = this.levelManager.current.start;
+		if (!this.player?.sprite?.body || !this.touchControls?.visible) {
+			return { x: start.x, y: start.y };
+		}
+		if (!isTouchDevice(this)) {
+			return { x: start.x, y: start.y };
+		}
+		const sprite = this.player.sprite;
+		const prev = { x: sprite.x, y: sprite.y };
+		this.resetPlayerToLevelStartForSpawnPick();
+		try {
+			this.ensureTouchSpawnLayoutFits();
+			return this.touchSpawnCoordsAtCurrentLayoutScale();
+		} finally {
+			sprite.setPosition(prev.x, prev.y);
+			const body = sprite.body as Phaser.Physics.Arcade.Body;
+			body.updateFromGameObject();
+		}
+	}
+
+	/** Expected spawn at current touch layout (matches resolveTouchSpawnPlacement). */
+	touchSpawnPosition(): { x: number; y: number } {
+		if (this.lastTouchSpawnPlacement) {
+			return { ...this.lastTouchSpawnPlacement };
+		}
+		return this.touchSpawnExpectedAtCurrentLayout();
+	}
+
 	resetPlayer() {
 		if (!this.player) return;
 		this.clearLevelInstruction();
 		this.clearColliders();
-		const startPos = this.levelManager.current.start;
-		this.player.revive(startPos.x, startPos.y);
+		const spawnPos = this.resolveTouchSpawnPlacement();
+		this.player.revive(spawnPos.x, spawnPos.y);
 		this.setupLevelColliders();
+		this.syncPortraitBlockerPause();
+	}
+
+	private touchLivesFontSize(): string {
+		if (!isTouchDevice(this)) return '40px';
+		if (this.scale.displaySize.width <= 568) {
+			return touchFontSizeStyle(this, 24);
+		}
+		return '40px';
 	}
 
 	createLivesHud() {
 		this.livesText?.destroy();
+		const chrome = isTouchDevice(this) ? touchChromeMetrics(this) : null;
+		const livesX = chrome ? chrome.livesTextX : 24;
+		const livesY = chrome ? chrome.livesTextY : 58;
 		this.livesText = this.add
-			.text(24, PLAY_HUD_CLEARANCE_Y + 8, this.livesLabel(), {
+			.text(livesX, livesY, this.livesLabel(), {
 				fontFamily: 'Pixelify Sans',
-				fontSize: '40px',
+				fontSize: this.touchLivesFontSize(),
 				color: '#fdfdfe',
 				stroke: PALETTE_HEX.deep,
 				strokeThickness: 3,
@@ -535,18 +1293,428 @@ export class Play extends Scene {
 		this.livesText?.setVisible(visible);
 	}
 
-	togglePause() {
+	private clampPlayerToWorldSides = () => {
+		if (!this.player?.sprite?.body || this.player.isDead || this.isPaused) {
+			return;
+		}
+		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
+		this.player.clampHorizontalWorldBounds(body);
+	};
+
+	handleDisplayResize(): void {
+		this.touchSpawnLayoutEpoch++;
+		this.scale.refresh();
+		const wasPortraitMedia = this.portraitMediaActive;
+		const wasAspectPortrait = this.lastWindowAspectPortrait;
+		const portraitMedia = isPortraitBlockerActive();
+		const aspectPortrait = this.windowAspectIsPortrait();
+		this.portraitMediaActive = portraitMedia;
+		this.lastWindowAspectPortrait = aspectPortrait;
+		this.touchControls?.relayout();
+		this.relayoutTouchChromeHud();
+		this.relayoutLevelInstructionIfVisible();
+		const leavingPortrait =
+			this.touchControls?.visible &&
+			(wasPortraitMedia || wasAspectPortrait) &&
+			!portraitMedia &&
+			!aspectPortrait;
+		if (leavingPortrait) {
+			if (
+				!this.pendingTouchDeathRespawn &&
+				(this.touchResizePreservesPlayerProgress() ||
+					this.playerAwayFromTouchSpawnBand())
+			) {
+				this.pendingTouchLandscapeSpawn = false;
+			} else {
+				this.pendingTouchLandscapeSpawn = true;
+			}
+		}
+		this.syncPortraitBlockerPause();
+		if (
+			leavingPortrait &&
+			this.pendingTouchDeathRespawn &&
+			!this.touchResizePreservesPlayerProgress()
+		) {
+			this.applyTouchRespawnAtCurrentLayout();
+		} else if (leavingPortrait) {
+			this.syncTouchLandscapeSpawnIfNeeded();
+		} else {
+			this.syncTouchLandscapeSpawnIfNeeded();
+		}
+		if (
+			this.isResetting &&
+			this.touchControls?.visible &&
+			!portraitMedia &&
+			!aspectPortrait
+		) {
+			this.touchDeathMidResizePendingReconcile = true;
+		}
+		if (!this.isResetting && !this.player?.isDead) {
+			this.syncPlayerToTouchSpawnAtCurrentLayout();
+			this.schedulePushClearOfTouchButtons();
+		}
+		this.touchSpawnLayoutEpochDone = this.touchSpawnLayoutEpoch;
+		this.touchSpawnSettledAtFrame = this.game.loop.frame;
+		if (!this.isResetting) {
+			this.reconcileTouchSpawnSpriteWithExpected();
+		}
+	}
+
+	private touchResizePreservesPlayerProgress(): boolean {
+		const start = this.levelManager.current.start;
+		const px = this.player?.sprite?.x ?? start.x;
+		return px > start.x + 500 && px > 800;
+	}
+
+	/** Player left the touch spawn band (mid-level progress); do not snap on rotate. */
+	private playerAwayFromTouchSpawnBand(): boolean {
+		if (!this.player?.sprite || !this.touchControls?.visible) {
+			return false;
+		}
+		const px = this.player.sprite.x;
+		const placed = this.lastTouchSpawnPlacement;
+		if (placed) {
+			return Math.abs(px - placed.x) > 12;
+		}
+		const start = this.levelManager.current.start;
+		const sprite = this.player.sprite;
+		const sprB = sprite.getBounds();
+		const spriteHalfW = (sprB.right - sprB.left) / 2;
+		const clusterMin = this.touchControls.getMinSpawnX(spriteHalfW);
+		const maxDelta = Math.max(
+			72,
+			clusterMin - start.x,
+			clusterMin + 72 - start.x,
+		);
+		return px > start.x + maxDelta + 12;
+	}
+
+	private playerOverlapsTouchGameplayButtons(): boolean {
+		if (!this.touchControls?.visible || !this.player?.sprite?.body) {
+			return false;
+		}
+		const buttons = this.touchGameplayButtons();
+		if (buttons.length === 0) return false;
+		const sprite = this.player.sprite;
+		const sprB = sprite.getBounds();
+		const spriteHalfW = (sprB.right - sprB.left) / 2;
+		const spriteHalfH = (sprB.bottom - sprB.top) / 2;
+		return spriteOverlapsButtons(
+			sprite.x,
+			sprite.y,
+			spriteHalfW,
+			spriteHalfH,
+			buttons,
+		);
+	}
+
+	private repositionTouchSpawnIfOverlappingButtons(): void {
+		if (!this.touchControls?.visible || !this.player?.sprite?.body) return;
+		if (this.touchResizePreservesPlayerProgress()) return;
+		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
+		const buttons = this.touchGameplayButtons();
+		if (buttons.length === 0) return;
+		const sprite = this.player.sprite;
+		const sprB = sprite.getBounds();
+		const spriteHalfW = (sprB.right - sprB.left) / 2;
+		const spriteHalfH = (sprB.bottom - sprB.top) / 2;
+		const playerY = sprite.y;
+		if (
+			!spriteOverlapsButtons(
+				sprite.x,
+				playerY,
+				spriteHalfW,
+				spriteHalfH,
+				buttons,
+			)
+		) {
+			return;
+		}
+		const pos = this.resolveTouchSpawnPlacement();
+		this.player.sprite.setPosition(pos.x, pos.y);
+		body.updateFromGameObject();
+	}
+
+	private schedulePushClearOfTouchButtons(): void {
+		if (!this.playerOverlapsTouchGameplayButtons()) {
+			return;
+		}
+		const generation = ++this.resizePushGeneration;
+		this.resizePushTimer?.remove(false);
+		this.resizePushTimer = this.time.delayedCall(280, () => {
+			if (generation !== this.resizePushGeneration) return;
+			this.pushPlayerClearOfTouchButtons();
+		});
+	}
+
+	private pushPlayerClearOfTouchButtons(): void {
+		if (!this.touchControls?.visible || !this.player?.sprite?.body) return;
+		if (this.player.isDead || this.isResetting) return;
+		if (this.touchResizePreservesPlayerProgress()) return;
+		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
+		const buttons = this.touchGameplayButtons();
+		if (buttons.length === 0) return;
+
+		const sprite = this.player.sprite;
+		const sprB = sprite.getBounds();
+		const spriteHalfW = (sprB.right - sprB.left) / 2;
+		const spriteHalfH = (sprB.bottom - sprB.top) / 2;
+		const playerY = sprite.y;
+		const startX = sprite.x;
+
+		if (
+			!spriteOverlapsButtons(
+				startX,
+				playerY,
+				spriteHalfW,
+				spriteHalfH,
+				buttons,
+			)
+		) {
+			return;
+		}
+
+		const pos = this.resolveTouchSpawnPlacement();
+		this.player.sprite.setPosition(pos.x, pos.y);
+		body.updateFromGameObject();
+	}
+
+	private relayoutLevelInstructionIfVisible(): void {
+		if (!this.instructionPanel?.active || !this.instructionText?.active) {
+			return;
+		}
+		const panelY = isTouchDevice(this)
+			? touchInstructionPanelCenterY(this, this.livesText)
+			: PLAY_HUD_CLEARANCE_Y + 110;
+		const panelW = this.cameras.main.width - 120;
+		this.instructionPanel.setPosition(
+			this.cameras.main.width / 2,
+			panelY,
+		);
+		this.instructionPanel.width = panelW;
+		this.instructionText.setPosition(
+			this.cameras.main.width / 2,
+			panelY,
+		);
+		this.instructionText.setWordWrapWidth(this.cameras.main.width - 200);
+	}
+
+	private relayoutTouchChromeHud(): void {
+		if (!isTouchDevice(this)) return;
+		const chrome = touchChromeMetrics(this);
+		if (this.livesText?.active) {
+			this.livesText.setPosition(chrome.livesTextX, chrome.livesTextY);
+			this.livesText.setFontSize(this.touchLivesFontSize());
+		}
+		this.levelManager.relayoutTouchHudTitle(chrome);
+	}
+
+	private gameplayTimeScale = 1;
+
+	private setGameplayClockPaused(paused: boolean): void {
+		if (paused) {
+			if (this.time.timeScale > 0) {
+				this.gameplayTimeScale = this.time.timeScale;
+			}
+			this.time.timeScale = 0;
+			this.time.paused = true;
+			this.tweens.pauseAll();
+			this.levelManager.setFireballTimersPaused(true);
+			return;
+		}
+		this.time.paused = false;
+		this.time.timeScale = this.gameplayTimeScale;
+		this.tweens.resumeAll();
+		if (!this.isResetting) {
+			this.levelManager.setFireballTimersPaused(false);
+		}
+	}
+
+	syncPortraitBlockerPause(): void {
+		if (!isTouchDevice(this)) return;
+		const world = this.physics?.world;
+		if (!world) return;
+		this.portraitMediaActive = isPortraitBlockerActive();
+		if (isPortraitBlockerActive()) {
+			if (this.pausePanel) return;
+			if (this.isResetting || this.deathSequence?.isEscBlocked()) {
+				return;
+			}
+			this.portraitBlockerPauseActive = true;
+			this.isPaused = true;
+			if (!world.isPaused) {
+				this.physics.pause();
+			}
+			this.setGameplayClockPaused(true);
+			return;
+		}
+		if (this.pausePanel) {
+			return;
+		}
+		const wasPortraitPause = this.portraitBlockerPauseActive;
+		this.portraitBlockerPauseActive = false;
+		const deathOrReset =
+			this.isResetting ||
+			this.player?.isDead ||
+			this.deathSequence?.isEscBlocked();
+		const canResumeGameplay =
+			!this.pausePanel && !deathOrReset;
+		if (
+			canResumeGameplay &&
+			(wasPortraitPause || this.isPaused || world.isPaused)
+		) {
+			this.isPaused = false;
+			if (world.isPaused) {
+				this.physics.resume();
+			}
+			if (this.time.paused || this.time.timeScale === 0) {
+				this.setGameplayClockPaused(false);
+			}
+			if (this.player && !this.player.isDead) {
+				this.player.controlsEnabled = true;
+			}
+		}
+		if (this.pendingTouchDeathRespawn && this.player && !this.player.isDead) {
+			this.applyTouchRespawnAtCurrentLayout();
+		}
+		this.syncTouchLandscapeSpawnIfNeeded();
+	}
+
+	private windowAspectIsPortrait(): boolean {
+		if (typeof window === 'undefined' || !window.matchMedia) {
+			return false;
+		}
+		return window.matchMedia('(orientation: portrait)').matches;
+	}
+
+	/** Portrait blocker or stale portrait-shaped Phaser displaySize on landscape window. */
+	private touchDeathSpawnLayoutDeferred(): boolean {
+		if (!isTouchDevice(this) || !this.touchControls?.visible) {
+			return false;
+		}
+		if (isPortraitBlockerActive()) {
+			return true;
+		}
+		if (this.windowAspectIsPortrait()) {
+			return true;
+		}
+		if (typeof window === 'undefined') {
+			return false;
+		}
+		const dw = this.scale.displaySize.width;
+		const dh = this.scale.displaySize.height;
+		return dh > dw * 1.02;
+	}
+
+	/** Apply touch spawn for a death respawn using the current (landscape) layout. */
+
+	private applyTouchRespawnAtCurrentLayout(): void {
+		if (
+			!this.player?.sprite?.body ||
+			!this.touchControls?.visible ||
+			isPortraitBlockerActive()
+		) {
+			return;
+		}
+		this.scale.refresh();
+		if (this.touchDeathSpawnLayoutDeferred()) {
+			return;
+		}
+		this.touchControls.relayout();
+		this.relayoutTouchChromeHud();
+		const placed = this.resolveTouchSpawnPlacement(false);
+		this.repositionTouchSpawnIfOverlappingButtons();
+		this.lastTouchSpawnPlacement = placed;
+		this.pendingTouchDeathRespawn = false;
+		this.pendingTouchLandscapeSpawn = false;
+		this.touchSpawnLayoutEpoch++;
+		this.touchSpawnLayoutEpochDone = this.touchSpawnLayoutEpoch;
+		this.touchSpawnSettledAtFrame = this.game.loop.frame;
+	}
+
+	/** QA / portrait return: snap player to touch spawn when layout changed. */
+	requestTouchSpawnLandscapeSync(): void {
+		this.pendingTouchLandscapeSpawn = true;
+		this.syncTouchLandscapeSpawnIfNeeded(true);
+	}
+
+	private syncTouchLandscapeSpawnIfNeeded(forceSpawn = false): void {
+		if (!this.pendingTouchLandscapeSpawn || !this.player?.sprite?.body) {
+			return;
+		}
+		if (this.player.isDead || isPortraitBlockerActive()) {
+			return;
+		}
+		this.pendingTouchLandscapeSpawn = false;
+		this.touchControls?.relayout();
+		if (this.touchResizePreservesPlayerProgress()) {
+			return;
+		}
+		if (
+			!this.pendingTouchDeathRespawn &&
+			this.playerAwayFromTouchSpawnBand()
+		) {
+			return;
+		}
+		if (!forceSpawn && !this.playerOverlapsTouchGameplayButtons()) {
+			return;
+		}
+		const spawn = this.resolveTouchSpawnPlacement();
+		this.player.setPosition(spawn.x, spawn.y);
+		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
+		body.updateFromGameObject();
+	}
+
+	requestPause() {
 		if (this.pausePanel) {
 			this.closePause();
 			return;
 		}
+		if (this.deathSequence?.isEscBlocked()) return;
+		if (this.isResetting) return;
+		if (this.player?.isDead) return;
+		this.togglePause();
+	}
+
+	private stackPauseMenuButton(
+		cx: number,
+		belowBottom: number,
+		label: string,
+		gap: number,
+		onTap: () => void,
+	): { btn: Phaser.GameObjects.Text; bottom: number } {
+		const btn = this.add
+			.text(cx, belowBottom + gap, label, {
+				fontFamily: 'Pixelify Sans',
+				fontSize: '44px',
+				color: PALETTE_HEX.cloudWhite,
+				backgroundColor: PALETTE_HEX.deep,
+				padding: { x: 28, y: 14 },
+			})
+			.setOrigin(0.5, 0)
+			.setInteractive({ useHandCursor: true });
+		btn.on('pointerdown', onTap);
+		const b = btn.getBounds();
+		return { btn, bottom: b.bottom };
+	}
+
+	togglePause() {
+		this.portraitBlockerPauseActive = false;
 		this.isPaused = true;
 		this.physics.pause();
+		this.setGameplayClockPaused(true);
 		this.pausePanel = this.add.container(0, 0).setDepth(250);
+		const cx = this.cameras.main.width / 2;
+		const cy = this.cameras.main.height / 2;
+		const displayScale = Math.min(
+			this.scale.displaySize.width / 1920,
+			this.scale.displaySize.height / 1080,
+		);
+		const gap = Math.max(16, Math.ceil(10 / displayScale));
 		const bg = this.add
 			.rectangle(
-				this.cameras.main.width / 2,
-				this.cameras.main.height / 2,
+				cx,
+				cy,
 				this.cameras.main.width,
 				this.cameras.main.height,
 				0x0b1a2e,
@@ -554,25 +1722,56 @@ export class Play extends Scene {
 			)
 			.setInteractive();
 		const title = this.add
-			.text(this.cameras.main.width / 2, this.cameras.main.height / 2 - 40, 'Paused', {
+			.text(cx, cy - 200, 'Paused', {
 				fontFamily: 'Pixelify Sans',
 				fontSize: '72px',
 				color: '#ffdd00',
 			})
-			.setOrigin(0.5);
-		const hint = this.add
-			.text(
-				this.cameras.main.width / 2,
-				this.cameras.main.height / 2 + 40,
-				'Esc: Resume   |   Q: Quit to menu',
-				{
-					fontFamily: 'Pixelify Sans',
-					fontSize: '36px',
-					color: '#fdfdfe',
+			.setOrigin(0.5, 0);
+		let cursorBottom = title.getBounds().bottom;
+		const resume = this.stackPauseMenuButton(cx, cursorBottom, 'Resume', gap, () =>
+			this.closePause(),
+		);
+		cursorBottom = resume.bottom;
+		const pauseChildren: Phaser.GameObjects.GameObject[] = [
+			bg,
+			title,
+			resume.btn,
+		];
+		if (isTouchDevice(this)) {
+			const restart = this.stackPauseMenuButton(
+				cx,
+				cursorBottom,
+				'Restart level',
+				gap,
+				() => {
+					this.closePause();
+					if (!this.isResetting) {
+						this.killPlayer('fall', { fast: true, spendLife: false });
+					}
 				},
-			)
-			.setOrigin(0.5);
-		this.pausePanel.add([bg, title, hint]);
+			);
+			cursorBottom = restart.bottom;
+			pauseChildren.push(restart.btn);
+		}
+		const quit = this.stackPauseMenuButton(cx, cursorBottom, 'Quit to menu', gap, () => {
+			this.closePause();
+			this.sound.stopAll();
+			this.scene.start('Menu');
+		});
+		cursorBottom = quit.bottom;
+		pauseChildren.push(quit.btn);
+		if (!isTouchDevice(this)) {
+			const hint = this.add
+				.text(cx, cursorBottom + gap, 'Esc: Resume   |   Q: Quit to menu', {
+					fontFamily: 'Pixelify Sans',
+					fontSize: '32px',
+					color: '#fdfdfe',
+				})
+				.setOrigin(0.5, 0);
+			pauseChildren.push(hint);
+		}
+		this.pausePanel.add(pauseChildren);
 		this.pauseQuitKey = this.input.keyboard?.addKey(
 			Phaser.Input.Keyboard.KeyCodes.Q,
 		);
@@ -591,6 +1790,8 @@ export class Play extends Scene {
 		this.pausePanel = undefined;
 		this.isPaused = false;
 		this.physics.resume();
+		this.setGameplayClockPaused(false);
+		this.syncPortraitBlockerPause();
 	}
 
 	showLevelInstruction() {
@@ -600,7 +1801,9 @@ export class Play extends Scene {
 			lvl.instruction ?? 'Reach the portal.',
 		);
 
-		const panelY = PLAY_HUD_CLEARANCE_Y + 72;
+		const panelY = isTouchDevice(this)
+			? touchInstructionPanelCenterY(this, this.livesText)
+			: PLAY_HUD_CLEARANCE_Y + 110;
 		this.instructionPanel = this.add
 			.rectangle(
 				this.cameras.main.width / 2,
@@ -610,12 +1813,12 @@ export class Play extends Scene {
 				0x0b1a2e,
 				0.75,
 			)
-			.setDepth(14);
+			.setDepth(30);
 
 		this.instructionText = this.add
 			.text(this.cameras.main.width / 2, panelY, instruction, {
 				fontFamily: 'Pixelify Sans',
-				fontSize: '48px',
+				fontSize: touchFontSizeStyle(this, 48),
 				color: '#fdfdfe',
 				stroke: PALETTE_HEX.deep,
 				strokeThickness: 2,
@@ -627,7 +1830,7 @@ export class Play extends Scene {
 				},
 			})
 			.setOrigin(0.5)
-			.setDepth(15);
+			.setDepth(31);
 
 		// Fade out instruction message
 		this.tweens.add({
@@ -691,7 +1894,6 @@ export class Play extends Scene {
 			{ key: 'canShootArrows', icon: 'bow' },
 		];
 
-		const startY = 320;
 		const boxSize = 280;
 		const spacing = 40;
 		const cols = 3;
@@ -720,10 +1922,30 @@ export class Play extends Scene {
 				this.resetPlayer();
 				this.playBattleMusic();
 				this.showLevelInstruction();
-				this.isResetting = false;
+				this.endLevelTransitionReset();
+				this.syncPortraitBlockerPause();
 			}
 			return;
 		}
+
+		const rows = Math.ceil(downgradeable.length / cols);
+		const canvasH = this.cameras.main.height;
+		const titleBottom = 130;
+		const helperBand = 56;
+		const maxGridBottom = canvasH - helperBand;
+		let rowHeight = 360;
+		let gridH = rows * rowHeight + (rows - 1) * spacing;
+		const available = maxGridBottom - titleBottom;
+		if (gridH > available) {
+			rowHeight = Math.max(
+				boxSize,
+				Math.floor((available - (rows - 1) * spacing) / rows),
+			);
+			gridH = rows * rowHeight + (rows - 1) * spacing;
+		}
+		const startY = titleBottom + rowHeight / 2;
+		const lastRowCenterY = startY + (rows - 1) * (rowHeight + spacing);
+		const helperY = lastRowCenterY + rowHeight / 2 + 32;
 
 		const buttons: Phaser.GameObjects.Rectangle[] = [];
 		let selectedIndex = 0;
@@ -737,10 +1959,67 @@ export class Play extends Scene {
 				startY,
 				boxSize,
 				spacing,
+				rowHeight,
 			);
 
+			const cardW = boxSize;
+			const textW = cardW - 24;
+			const myth = ABILITY_MYTH_NAME[data.key];
+			const stateLine = sanitizePixelFont(
+				abilityStateLine(data.key, this.abilityManager.abilities),
+			);
+			const lossLine = sanitizePixelFont(ABILITY_LOSS_LINE[data.key]);
+
+			const mythText = this.add
+				.text(0, 0, sanitizePixelFont(myth), {
+					fontFamily: 'Pixelify Sans',
+					fontSize: touchFontSizeStyle(this, 36),
+					color: ABILITY_CARD_INK_HEX,
+					align: 'center',
+					wordWrap: { width: textW },
+				})
+				.setVisible(false);
+			const stateText = this.add
+				.text(0, 0, stateLine, {
+					fontFamily: 'Pixelify Sans',
+					fontSize: touchFontSizeStyle(this, 30),
+					color: ABILITY_CARD_INK_HEX,
+					align: 'center',
+					wordWrap: { width: textW },
+				})
+				.setVisible(false);
+			const lossText = this.add
+				.text(0, 0, lossLine, {
+					fontFamily: 'Pixelify Sans',
+					fontSize: touchFontSizeStyle(this, 30),
+					color: ABILITY_LOSS_EFFECT_HEX,
+					align: 'center',
+					wordWrap: { width: textW },
+				})
+				.setVisible(false);
+
+			const iconSpace = 88;
+			const lineGap = 10;
+			const padBottom = 16;
+			const mythH = mythText.height;
+			const stateH = stateText.height;
+			const contentH =
+				iconSpace +
+				mythH +
+				lineGap +
+				stateH +
+				lineGap +
+				lossText.height +
+				padBottom;
+			const cardH = Math.min(rowHeight, Math.max(boxSize, contentH));
+			const cardTop = y - cardH / 2;
+
+			mythText.destroy();
+			stateText.destroy();
+			lossText.destroy();
+
 			const button = this.add
-				.rectangle(x, y, boxSize, boxSize, ABILITY_CARD_FILL)
+				.rectangle(x, y, cardW, cardH, ABILITY_CARD_FILL)
 				.setDepth(21)
 				.setInteractive()
 				.setData('abilityKey', data.key)
@@ -749,60 +2028,50 @@ export class Play extends Scene {
 					updateSelection();
 				})
 				.on('pointerdown', () => {
+					selectedIndex = buttons.indexOf(button);
 					selectAbility();
 				});
 
 			styleAbilityCard(button, false);
 			buttons.push(button);
 
-			addAbilityIcon(this, x, y, data.icon);
+			addAbilityIcon(this, x, cardTop, cardH, data.icon);
 
-			const myth = ABILITY_MYTH_NAME[data.key];
+			let textY = cardTop + iconSpace;
 			this.add
-				.text(x, y + 50, sanitizePixelFont(myth), {
+				.text(x, textY, sanitizePixelFont(myth), {
 					fontFamily: 'Pixelify Sans',
-					fontSize: '28px',
+					fontSize: touchFontSizeStyle(this, 36),
 					color: ABILITY_CARD_INK_HEX,
 					align: 'center',
-					wordWrap: { width: boxSize - 20 },
+					wordWrap: { width: textW },
 				})
-				.setOrigin(0.5)
+				.setOrigin(0.5, 0)
 				.setDepth(22);
-
-			this.add
-				.text(
-					x,
-					y + 88,
-					sanitizePixelFont(
-						abilityStateLine(data.key, this.abilityManager.abilities),
-					),
-					{
-						fontFamily: 'Pixelify Sans',
-						fontSize: '22px',
-						color: ABILITY_CARD_INK_HEX,
-						align: 'center',
-						wordWrap: { width: boxSize - 20 },
-					},
-				)
-				.setOrigin(0.5)
-				.setDepth(22);
-
-			this.add
-				.text(x, y + 128, sanitizePixelFont(ABILITY_LOSS_LINE[data.key]), {
+			textY += mythH + lineGap;
+			const stateRendered = this.add
+				.text(x, textY, stateLine, {
 					fontFamily: 'Pixelify Sans',
-					fontSize: '22px',
+					fontSize: touchFontSizeStyle(this, 30),
+					color: ABILITY_CARD_INK_HEX,
+					align: 'center',
+					wordWrap: { width: textW },
+				})
+				.setOrigin(0.5, 0)
+				.setDepth(22);
+			textY += stateRendered.height + lineGap;
+			this.add
+				.text(x, textY, lossLine, {
+					fontFamily: 'Pixelify Sans',
+					fontSize: touchFontSizeStyle(this, 30),
 					color: ABILITY_LOSS_EFFECT_HEX,
 					align: 'center',
-					wordWrap: { width: boxSize - 20 },
+					wordWrap: { width: textW },
 				})
-				.setOrigin(0.5)
+				.setOrigin(0.5, 0)
 				.setDepth(22);
 		});
 
-		const helperY =
-			startY +
-			Math.ceil(downgradeable.length / cols) * (boxSize + spacing) +
-			24;
 		this.add
 			.text(
 				this.cameras.main.width / 2,
@@ -812,7 +2081,7 @@ export class Play extends Scene {
 				),
 				{
 					fontFamily: 'Pixelify Sans',
-					fontSize: '32px',
+					fontSize: touchFontSizeStyle(this, 32),
 					color: PALETTE_HEX.cardHelper,
 					align: 'center',
 					wordWrap: { width: this.cameras.main.width - 120 },
@@ -850,6 +2119,8 @@ export class Play extends Scene {
 			this.player.controlsEnabled = true;
 			this.touchControls?.setGameplayVisible(true);
 			this.setGameplayHudVisible(true);
+			this.touchControls?.relayout();
+			this.relayoutTouchChromeHud();
 
 			this.input.keyboard?.off('keydown', keyHandler);
 
@@ -874,7 +2145,9 @@ export class Play extends Scene {
 				this.resetPlayer();
 				this.playBattleMusic();
 				this.showLevelInstruction();
-				this.isResetting = false;
+				this.endLevelTransitionReset();
+				this.syncPortraitBlockerPause();
+				this.handleDisplayResize();
 			}
 		};
 
@@ -969,7 +2242,8 @@ export class Play extends Scene {
 				this.resetPlayer();
 				this.playBattleMusic();
 				this.showLevelInstruction();
-				this.isResetting = false;
+				this.endLevelTransitionReset();
+				this.syncPortraitBlockerPause();
 			}
 			return;
 		}
@@ -990,10 +2264,24 @@ export class Play extends Scene {
 			.setOrigin(0.5)
 			.setDepth(21);
 
-		const startY = 320;
-		const boxSize = 280;
+		let boxSize = 280;
 		const spacing = 40;
 		const cols = Math.min(3, upgradeableAbilities.length);
+		const rows = Math.ceil(upgradeableAbilities.length / cols);
+		const chromeMetrics = touchChromeMetrics(this);
+		const footerReserve = chromeMetrics.chromeH + 150;
+		const titleBottom = 130;
+		const maxGridBottom = this.cameras.main.height - footerReserve;
+		let gridH = rows * boxSize + (rows - 1) * spacing;
+		const available = maxGridBottom - titleBottom;
+		if (gridH > available) {
+			boxSize = Math.max(
+				200,
+				Math.floor((available - (rows - 1) * spacing) / rows),
+			);
+			gridH = rows * boxSize + (rows - 1) * spacing;
+		}
+		const startY = titleBottom + boxSize / 2;
 
 		let selectedAbilities = 0;
 		const buttons: Phaser.GameObjects.Rectangle[] = [];
@@ -1024,6 +2312,7 @@ export class Play extends Scene {
 					updateSelection();
 				})
 				.on('pointerdown', () => {
+					selectedIndex = buttons.indexOf(button);
 					if (button.getData('selected')) return;
 					if (selectedAbilities >= maxSelections) return;
 					selectAbility();
@@ -1032,7 +2321,7 @@ export class Play extends Scene {
 			styleAbilityCard(button, false);
 			buttons.push(button);
 
-			addAbilityIcon(this, x, y, data.icon);
+			addAbilityIcon(this, x, y - boxSize / 2, boxSize, data.icon);
 
 			// Add regain label (what you get back)
 			this.add
@@ -1044,7 +2333,7 @@ export class Play extends Scene {
 					),
 					{
 						fontFamily: 'Pixelify Sans',
-						fontSize: '28px',
+						fontSize: touchFontSizeStyle(this, 28),
 						color: ABILITY_CARD_INK_HEX,
 						align: 'center',
 						wordWrap: { width: boxSize - 20 },
@@ -1061,6 +2350,15 @@ export class Play extends Scene {
 				styleAbilityCard(btn, i === selectedIndex);
 			});
 		};
+
+		const gainPickLine =
+			maxSelections === 1
+				? 'Choose 1 to take back.'
+				: `Choose up to ${maxSelections} to take back.`;
+		let gainHelperText = `${gainPickLine} Tap a card, or use the arrows and Enter.`;
+		if (!isTouchDevice(this)) {
+			gainHelperText += ' Shift+Enter when done.';
+		}
 
 		let gainFinished = false;
 		let gainCompleteTimer: Phaser.Time.TimerEvent | undefined;
@@ -1085,14 +2383,23 @@ export class Play extends Scene {
 			button.setStrokeStyle(3, ABILITY_CARD_INK, 1);
 			button.setData('selected', true);
 			selectedAbilities++;
+			if (selectedAbilities >= 1) {
+				showDoneButton();
+			}
 
+			const cardTop = button.y - boxSize / 2;
+			const iconArea = Math.min(
+				ABILITY_ICON_MAX,
+				Math.max(48, boxSize * 0.2),
+			);
+			const returnedY = cardTop + 12 + iconArea + 24;
 			this.add
-				.text(button.x, button.y - 100, 'Returned', {
+				.text(button.x, returnedY, 'Returned', {
 					fontFamily: 'Pixelify Sans',
-					fontSize: '24px',
+					fontSize: touchFontSizeStyle(this, 28),
 					color: ABILITY_CARD_INK_HEX,
 				})
-				.setOrigin(0.5)
+				.setOrigin(0.5, 0)
 				.setDepth(23);
 
 			if (selectedAbilities >= maxSelections) {
@@ -1117,7 +2424,7 @@ export class Play extends Scene {
 					const depth = (
 						child as Phaser.GameObjects.GameObject & { depth: number }
 					).depth;
-					return depth === 21 || depth === 22 || depth === 23;
+					return depth >= 21 && depth <= 24;
 				})
 				.forEach((child) => {
 					child.destroy();
@@ -1129,49 +2436,63 @@ export class Play extends Scene {
 				this.resetPlayer();
 				this.playBattleMusic();
 				this.showLevelInstruction();
-				this.isResetting = false;
+				this.endLevelTransitionReset();
+				this.syncPortraitBlockerPause();
 			}
 		};
 
-		const helperY =
-			startY +
-			Math.ceil(upgradeableAbilities.length / cols) * (boxSize + spacing) +
-			16;
-		this.add
+		const lastRowCenterY = startY + (rows - 1) * (boxSize + spacing);
+		const helperY = lastRowCenterY + boxSize / 2 + 32;
+		const helperTextObj = this.add
 			.text(
 				this.cameras.main.width / 2,
 				helperY,
-				sanitizePixelFont(
-					maxSelections === 1
-						? 'Choose 1 to take back.'
-						: `Choose ${maxSelections} to take back.`,
-				),
+				sanitizePixelFont(gainHelperText),
 				{
 					fontFamily: 'Pixelify Sans',
-					fontSize: '32px',
+					fontSize: touchFontSizeStyle(this, 32),
 					color: PALETTE_HEX.cardHelper,
-					align: 'center',
-				},
-			)
-			.setOrigin(0.5)
-			.setDepth(21);
-		this.add
-			.text(
-				this.cameras.main.width / 2,
-				helperY + 44,
-				sanitizePixelFont(
-					'Pick one. Arrow keys and Enter, or tap. Shift+Enter when done.',
-				),
-				{
-					fontFamily: 'Pixelify Sans',
-					fontSize: '28px',
-					color: '#fdfdfe',
 					align: 'center',
 					wordWrap: { width: this.cameras.main.width - 120 },
 				},
 			)
 			.setOrigin(0.5)
-			.setDepth(21);
+			.setDepth(21)
+			.setName('gain-helper');
+
+		let doneButtonBg: Phaser.GameObjects.Rectangle | undefined;
+		let doneButtonLabel: Phaser.GameObjects.Text | undefined;
+		const showDoneButton = () => {
+			if (doneButtonBg?.active) return;
+			const helperBottom = helperTextObj.y + helperTextObj.displayHeight / 2;
+			const chrome = touchChromeMetrics(this);
+			const doneH = chrome.chromeH;
+			const doneW = Math.max(chrome.chromeW, 160);
+			const doneY = helperBottom + 28 + doneH / 2;
+			const cx = this.cameras.main.width / 2;
+			const onDone = () => {
+				if (selectedAbilities >= 1) {
+					finishGain();
+				}
+			};
+			doneButtonBg = this.add
+				.rectangle(cx, doneY, doneW, doneH, PALETTE.deep, 0.95)
+				.setStrokeStyle(2, PALETTE.cloudWhite, 0.35)
+				.setDepth(23)
+				.setInteractive({ useHandCursor: true });
+			doneButtonLabel = this.add
+				.text(cx, doneY, 'Done', {
+					fontFamily: 'Pixelify Sans',
+					fontSize: touchFontSizeStyle(this, 40),
+					color: PALETTE_HEX.cloudWhite,
+					align: 'center',
+				})
+				.setOrigin(0.5)
+				.setDepth(24);
+			doneButtonBg.on('pointerdown', onDone);
+			doneButtonLabel.setInteractive({ useHandCursor: true });
+			doneButtonLabel.on('pointerdown', onDone);
+		};
 
 		const keyHandler = (event: KeyboardEvent) => {
 			if (event.code === 'ArrowLeft' || event.code === 'KeyA') {

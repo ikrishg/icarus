@@ -27,16 +27,16 @@ export function abilityStateLine(
 		case 'jumpLevel': {
 			const j = abilities.jumpLevel;
 			const beats = maxJumpsForJumpLevel(j);
-			const label = beats === 1 ? '1 wingbeat' : `${beats} wingbeats`;
 			if (j <= JUMP_LEVEL_FLOOR) {
-				return `Feathers: ${label} (minimum)`;
+				const label = beats === 1 ? '1 wingbeat' : `${beats} wingbeats`;
+				return `${label} (minimum)`;
 			}
 			const afterBeats = maxJumpsForJumpLevel(
 				Math.max(JUMP_LEVEL_FLOOR, j - 1),
 			);
 			const afterLabel =
 				afterBeats === 1 ? '1 wingbeat' : `${afterBeats} wingbeats`;
-			return `Feathers: ${label} → ${afterLabel}`;
+			return `Feathers: ${beats} -> ${afterLabel}`;
 		}
 		case 'visionLevel': {
 			const v = abilities.visionLevel;
@@ -46,8 +46,8 @@ export function abilityStateLine(
 		}
 		case 'dashLevel': {
 			const d = abilities.dashLevel;
-			if (d >= 2) return 'Speed: dash';
-			if (d === 1) return 'Speed: dash to walk';
+			if (d >= 2) return 'Speed: dash -> walk';
+			if (d === 1) return 'Speed: walk -> slow';
 			return 'Speed: slow walk';
 		}
 		case 'canMoveLeft':

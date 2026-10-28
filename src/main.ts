@@ -29,7 +29,7 @@ const config: Phaser.Types.Core.GameConfig = {
   },
   scale: {
     mode: Scale.ScaleModes.FIT,
-    autoCenter: Scale.Center.CENTER_BOTH,
+    autoCenter: Scale.Center.NO_CENTER,
     parent: 'icarus-window',
     width: WIDTH,
     height: HEIGHT,
