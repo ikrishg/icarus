@@ -152,6 +152,8 @@ export class Play extends Scene {
 	private lastTouchSpawnPlacement: { x: number; y: number } | null = null;
 	/** While true, always snap player to touch spawn (QA prepareLevel). */
 	private preparingTouchLevelForQa = false;
+	/** Landscape resize during touch death reset; reconcile once when respawn finishes. */
+	private touchDeathMidResizePendingReconcile = false;
 
 	constructor() {
 		super('Play');
@@ -235,18 +237,8 @@ export class Play extends Scene {
 				}
 				return track?.samples ?? [];
 			};
-			window.__icarusIsTouchSpawnLayoutSettled = () => {
-				if (!this.isTouchSpawnLayoutSettled()) {
-					return false;
-				}
-				if (this.touchControls?.visible && this.player?.sprite?.body) {
-					const want = this.touchSpawnExpectedAtCurrentLayout();
-					if (Math.abs(this.player.sprite.x - want.x) > 4) {
-						this.applyTouchSpawnSpriteCoords(want);
-					}
-				}
-				return true;
-			};
+			window.__icarusIsTouchSpawnLayoutSettled = () =>
+				this.isTouchSpawnLayoutSettled();
 			window.__icarusTouchSpawnDiagnostics = () => {
 				const sprite = this.player?.sprite;
 				const want = this.touchSpawnExpectedAtCurrentLayout();
@@ -530,6 +522,7 @@ export class Play extends Scene {
 		this.clearLevelInstruction();
 		this.setGameplayHudVisible(false);
 		this.isResetting = true;
+		this.touchDeathMidResizePendingReconcile = false;
 		this.resizePushTimer?.remove(false);
 		this.resizePushGeneration++;
 		this.levelManager.setFireballTimersPaused(true);
@@ -542,6 +535,18 @@ export class Play extends Scene {
 			this.relayoutTouchChromeHud();
 			this.setGameplayHudVisible(true);
 			this.endLevelTransitionReset();
+			if (this.touchDeathMidResizePendingReconcile) {
+				this.touchDeathMidResizePendingReconcile = false;
+				if (
+					this.touchControls?.visible &&
+					this.player?.sprite?.body &&
+					!this.player.isDead
+				) {
+					this.applyTouchSpawnSpriteCoords(
+						this.touchSpawnExpectedAtCurrentLayout(),
+					);
+				}
+			}
 			if (isPortraitBlockerActive()) {
 				this.portraitBlockerPauseActive = true;
 				this.isPaused = true;
@@ -1046,6 +1051,9 @@ export class Play extends Scene {
 	}
 
 	private applyTouchSpawnSpriteCoords(want: { x: number; y: number }): void {
+		if (import.meta.env.VITE_NOSNAP_PROOF === 'true') {
+			return;
+		}
 		const sprite = this.player!.sprite;
 		const body = sprite.body as Phaser.Physics.Arcade.Body;
 		sprite.setPosition(want.x, want.y);
@@ -1056,6 +1064,9 @@ export class Play extends Scene {
 
 	/** Snap sprite to expected touch spawn when layout settled but position is stale. */
 	private reconcileTouchSpawnSpriteWithExpected(): void {
+		if (import.meta.env.VITE_NOSNAP_PROOF === 'true') {
+			return;
+		}
 		if (
 			!this.touchControls?.visible ||
 			!this.player?.sprite?.body ||
@@ -1095,7 +1106,6 @@ export class Play extends Scene {
 		const nearWant = Math.abs(px - want.x) <= 96;
 		const nearSpawnBand =
 			staleLayoutSpawn ||
-			(placed == null && nearWant) ||
 			(nearWant && !this.playerAwayFromTouchSpawnBand());
 		if (!nearSpawnBand && this.playerAwayFromTouchSpawnBand()) {
 			return;
@@ -1104,11 +1114,18 @@ export class Play extends Scene {
 	}
 
 	private syncPlayerToTouchSpawnAtCurrentLayout(): void {
+		if (import.meta.env.VITE_NOSNAP_PROOF === 'true') {
+			return;
+		}
 		if (
 			!this.touchControls?.visible ||
 			!this.player?.sprite?.body ||
 			this.player.isDead
 		) {
+			return;
+		}
+		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
+		if (!body.blocked.down && Math.abs(body.velocity.y) > 24) {
 			return;
 		}
 		if (
@@ -1179,17 +1196,6 @@ export class Play extends Scene {
 			return { x: fallback, y: start.y };
 		}
 		return { x: start.x, y: start.y };
-	}
-
-	private finalizeTouchSpawnPlacement(pos: { x: number; y: number }): {
-		x: number;
-		y: number;
-	} {
-		const out = this.finalizeTouchSpawnCoords(pos);
-		this.player.sprite.setPosition(out.x, out.y);
-		const body = this.player.sprite.body as Phaser.Physics.Arcade.Body;
-		body.updateFromGameObject();
-		return out;
 	}
 
 	/** Read-only expected spawn at current touch layout (matches resolve). */
@@ -1318,13 +1324,23 @@ export class Play extends Scene {
 		} else {
 			this.syncTouchLandscapeSpawnIfNeeded();
 		}
+		if (
+			this.isResetting &&
+			this.touchControls?.visible &&
+			!portraitMedia &&
+			!aspectPortrait
+		) {
+			this.touchDeathMidResizePendingReconcile = true;
+		}
 		if (!this.isResetting && !this.player?.isDead) {
 			this.syncPlayerToTouchSpawnAtCurrentLayout();
 			this.schedulePushClearOfTouchButtons();
 		}
 		this.touchSpawnLayoutEpochDone = this.touchSpawnLayoutEpoch;
 		this.touchSpawnSettledAtFrame = this.game.loop.frame;
-		this.reconcileTouchSpawnSpriteWithExpected();
+		if (!this.isResetting) {
+			this.reconcileTouchSpawnSpriteWithExpected();
+		}
 	}
 
 	private touchResizePreservesPlayerProgress(): boolean {

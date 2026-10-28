@@ -370,7 +370,7 @@ export class LevelManager {
 			this.fireballs = this.fireballs.filter((fb) => fb.sprite?.active);
 		};
 
-		// Main: delayedCall(delay) + loop startAt delay (same first-fire time).
+		// Parity with main: delayedCall(delay) and loop startAt delay both fire at `delay`.
 		this.fireballTimers.push(
 			this.scene.time.delayedCall(delay, spawnFireball),
 		);

@@ -1,4 +1,6 @@
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 import { chromium, devices } from 'playwright';
 import { loadJumpReachCheck } from './import-jump-reach.mjs';
@@ -6,6 +8,49 @@ import { loadSanitizePixelFont } from './import-sanitize.mjs';
 import { startStaticServer } from './static-server.mjs';
 
 const ARTIFACT_SCREENSHOTS = '/opt/cursor/artifacts/screenshots';
+
+let cachedQaBuildStamp = null;
+function getQaBuildStamp() {
+	if (cachedQaBuildStamp) {
+		return cachedQaBuildStamp;
+	}
+	const gitSha = execSync('git rev-parse HEAD', {
+		cwd: process.cwd(),
+		encoding: 'utf8',
+	}).trim();
+	const distDir = join(process.cwd(), 'dist');
+	const hash = createHash('sha256');
+	const jsFiles = [];
+	const walk = (dir) => {
+		for (const name of readdirSync(dir, { withFileTypes: true })) {
+			const path = join(dir, name.name);
+			if (name.isDirectory()) {
+				walk(path);
+			} else if (name.name.endsWith('.js')) {
+				jsFiles.push(path);
+			}
+		}
+	};
+	if (readdirSync(distDir, { withFileTypes: true }).length) {
+		walk(distDir);
+	}
+	for (const path of jsFiles.sort()) {
+		hash.update(readFileSync(path));
+	}
+	cachedQaBuildStamp = {
+		gitSha,
+		distHash: hash.digest('hex').slice(0, 16),
+	};
+	return cachedQaBuildStamp;
+}
+
+function stampQaJson(payload) {
+	return { ...payload, ...getQaBuildStamp() };
+}
+
+function logQaJson(payload) {
+	console.log(JSON.stringify(stampQaJson(payload), null, 2));
+}
 
 const trackedBrowsers = new Set();
 let qaWalkHttpServer = null;
@@ -3119,6 +3164,86 @@ async function runTouchChromeLivesGap(baseUrl) {
 	return { touchChromeLivesGapOk: failures.length === 0, failures };
 }
 
+async function runTouchDeathMidResizeSpawnAlignment(baseUrl) {
+	const cases = [
+		{
+			start: { width: 568, height: 320 },
+			mid: { width: 932, height: 430 },
+			cause: 'fall',
+			level: 0,
+		},
+		{
+			start: { width: 844, height: 390 },
+			mid: { width: 568, height: 270 },
+			cause: 'fire',
+			level: 1,
+		},
+	];
+	const failures = [];
+	const browser = await launchChromium();
+	const page = await browser.newPage({
+		viewport: cases[0].start,
+		isMobile: true,
+		hasTouch: true,
+	});
+	await bootToPlay(page, baseUrl);
+	for (const caseDef of cases) {
+		await page.setViewportSize(caseDef.start);
+		await page.waitForTimeout(300);
+		await dispatchBrowserResizeEvents(page);
+		await page.evaluate((idx) => {
+			window.__icarusPrepareLevel?.(idx);
+		}, caseDef.level);
+		await waitForPlayReady(page, 20000);
+		await page.evaluate((cause) => {
+			window.__icarusGame?.scene
+				.getScene('Play')
+				?.killPlayer?.(cause, { fast: false, spendLife: false });
+		}, caseDef.cause);
+		await page.waitForTimeout(500);
+		await page.setViewportSize(caseDef.mid);
+		await dispatchBrowserResizeEvents(page);
+		await page.waitForFunction(
+			() => {
+				const play = window.__icarusGame?.scene.getScene('Play');
+				return play && !play.isResetting && !play.player?.isDead;
+			},
+			undefined,
+			{ timeout: 45000 },
+		);
+		await page.waitForTimeout(3000);
+		const detail = await page.evaluate(({ midWidth }) => {
+			const play = window.__icarusGame?.scene.getScene('Play');
+			if (!play?.touchControls?.visible || !play.player?.sprite) {
+				return { ok: false, reason: 'no-touch-play' };
+			}
+			const spawnX = play.player.sprite.x;
+			const want = play.touchSpawnExpectedAtCurrentLayout?.();
+			if (!want) {
+				return { ok: false, reason: 'no-want' };
+			}
+			const spawnTol = midWidth <= 640 ? 8 : 4;
+			const delta = Math.abs(spawnX - want.x);
+			return {
+				ok: delta <= spawnTol,
+				spawnX,
+				wantX: want.x,
+				delta,
+				spawnTol,
+				settled: window.__icarusIsTouchSpawnLayoutSettled?.() === true,
+			};
+		}, { midWidth: caseDef.mid.width });
+		if (!detail.ok) {
+			failures.push({ case: caseDef, ...detail });
+		}
+	}
+	await closeChromium(browser);
+	return {
+		touchDeathMidResizeSpawnOk: failures.length === 0,
+		failures,
+	};
+}
+
 async function runTouchDeathSpawnStableDuringRise(baseUrl) {
 	const viewports = [
 		{ width: 568, height: 320 },
@@ -4566,25 +4691,31 @@ async function main() {
 	qaWalkHttpServer = server;
 	if (process.env.QA_TOUCH_SPAWN_ONLY === '1') {
 		const touchSpawn = await runTouchSpawnSafety(baseUrl);
-		console.log(JSON.stringify({ touchSpawn }, null, 2));
+		logQaJson({ touchSpawn });
 		await exitQaWalk(touchSpawn.touchSpawnOk ? 0 : 1);
+	}
+	if (process.env.QA_MID_DEATH_RESIZE_ONLY === '1') {
+		const touchDeathMidResizeSpawn =
+			await runTouchDeathMidResizeSpawnAlignment(baseUrl);
+		logQaJson({ touchDeathMidResizeSpawn });
+		await exitQaWalk(
+			touchDeathMidResizeSpawn.touchDeathMidResizeSpawnOk ? 0 : 1,
+		);
 	}
 	if (process.env.QA_PORTRAIT_UNFREEZE_ONLY === '1') {
 		const portraitUnfreeze = await runPortraitUnfreezeCases(baseUrl);
-		console.log(JSON.stringify({ portraitUnfreeze }, null, 2));
+		logQaJson({ portraitUnfreeze });
 		await exitQaWalk(portraitUnfreeze.portraitUnfreezeOk ? 0 : 1);
 	}
 	if (process.env.QA_L15_ONLY === '1') {
 		const l15RealKeys = await runL15RealKeys(baseUrl);
-		console.log(JSON.stringify({ l15RealKeys }, null, 2));
+		logQaJson({ l15RealKeys });
 		await exitQaWalk(l15RealKeys.l15RealKeysOk ? 0 : 1);
 	}
 	if (process.env.QA_DEATH_ROTATE_PROBE === '1') {
 		const deathRotateTouchSpawnProbe =
 			await runDeathRotateTouchSpawnProbeMatrix(baseUrl);
-		console.log(
-			JSON.stringify({ deathRotateTouchSpawnProbe }, null, 2),
-		);
+		logQaJson({ deathRotateTouchSpawnProbe });
 		await exitQaWalk(
 			deathRotateTouchSpawnProbe.deathRotateTouchSpawnProbeOk ? 0 : 1,
 		);
@@ -4592,9 +4723,7 @@ async function main() {
 	if (process.env.QA_DEATH_SPAWN_RISE === '1') {
 		const touchDeathSpawnStableDuringRise =
 			await runTouchDeathSpawnStableDuringRise(baseUrl);
-		console.log(
-			JSON.stringify({ touchDeathSpawnStableDuringRise }, null, 2),
-		);
+		logQaJson({ touchDeathSpawnStableDuringRise });
 		await exitQaWalk(
 			touchDeathSpawnStableDuringRise.touchDeathSpawnStableDuringRiseOk
 				? 0
@@ -4603,7 +4732,7 @@ async function main() {
 	}
 	if (process.env.QA_FIREBALL_TIMING_ONLY === '1') {
 		const fireballFirstSpawnTiming = await runFireballFirstSpawnTiming(baseUrl);
-		console.log(JSON.stringify({ fireballFirstSpawnTiming }, null, 2));
+		logQaJson({ fireballFirstSpawnTiming });
 		await exitQaWalk(fireballFirstSpawnTiming.fireballFirstSpawnTimingOk ? 0 : 1);
 	}
 	// Before long browser suites so touch layout settle is not starved under CPU throttle.
@@ -4644,6 +4773,8 @@ async function main() {
 	const touchChromeLivesGap = await runTouchChromeLivesGap(baseUrl);
 	const touchDeathSpawnStableDuringRise =
 		await runTouchDeathSpawnStableDuringRise(baseUrl);
+	const touchDeathMidResizeSpawn =
+		await runTouchDeathMidResizeSpawnAlignment(baseUrl);
 	const deathRotateTouchSpawnProbe =
 		process.env.QA_DEATH_ROTATE_PROBE === '1'
 			? await runDeathRotateTouchSpawnProbeMatrix(baseUrl)
@@ -4711,6 +4842,7 @@ async function main() {
 		resizeProgressHold.resizeProgressHoldOk &&
 		touchChromeLivesGap.touchChromeLivesGapOk &&
 		touchDeathSpawnStableDuringRise.touchDeathSpawnStableDuringRiseOk &&
+		touchDeathMidResizeSpawn.touchDeathMidResizeSpawnOk &&
 		deathRotateTouchSpawnProbe.deathRotateTouchSpawnProbeOk &&
 		portraitDeathLandscapeSpawn.portraitDeathLandscapeSpawnOk &&
 		touchArrowSlide.touchArrowSlideOk &&
@@ -4737,7 +4869,7 @@ async function main() {
 
 	console.log(
 		JSON.stringify(
-			{
+			stampQaJson({
 				ligature,
 				openingRoutes: {
 					allOpeningRoutesOk,
@@ -4777,6 +4909,7 @@ async function main() {
 				resizeProgressHold,
 				touchChromeLivesGap,
 				touchDeathSpawnStableDuringRise,
+				touchDeathMidResizeSpawn,
 				deathRotateTouchSpawnProbe,
 				portraitDeathLandscapeSpawn,
 				touchArrowSlide,
@@ -4793,7 +4926,7 @@ async function main() {
 				lossScreen,
 				mobile,
 				pass,
-			},
+			}),
 			null,
 			2,
 		),
@@ -4803,6 +4936,6 @@ async function main() {
 
 main().catch(async (err) => {
 	console.error(err);
-	console.log(JSON.stringify({ pass: false, fatal: String(err) }, null, 2));
+	logQaJson({ pass: false, fatal: String(err) });
 	await exitQaWalk(1);
 });
