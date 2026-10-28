@@ -1742,6 +1742,9 @@ async function runTouchSpawnSafety(baseUrl) {
 				await waitTouchSpawnLayoutSettled(page);
 			}
 			for (const phase of ['spawn-check', 'death-respawn']) {
+			if (phase === 'spawn-check') {
+				await waitTouchSpawnLayoutSettled(page);
+			}
 			if (phase === 'death-respawn') {
 				await page.evaluate(() => {
 					window.__icarusGame?.scene
@@ -1875,6 +1878,7 @@ async function runTouchSpawnSafety(baseUrl) {
 					}
 				}
 				const spawnTol = vpWidth <= 640 ? 8 : 4;
+				const wantX = Math.round(want.x);
 				const hazardMarginPx = (() => {
 					const hazards = [];
 					for (const o of levelDef.obstacles ?? []) {
@@ -1906,7 +1910,7 @@ async function runTouchSpawnSafety(baseUrl) {
 				const diag = window.__icarusTouchSpawnDiagnostics?.() ?? null;
 				return {
 					ok:
-						Math.abs(spawnX - want.x) <= spawnTol &&
+						Math.abs(spawnX - wantX) <= spawnTol &&
 						hazardMarginOk &&
 						!overlapsButtons &&
 						spawnX >= boundsMin - 4 &&

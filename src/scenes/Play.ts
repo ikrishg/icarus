@@ -298,16 +298,13 @@ export class Play extends Scene {
 						this.syncPortraitBlockerPause();
 						this.preparingTouchLevelForQa = true;
 						this.handleDisplayResize();
-						if (!this.pendingTouchDeathRespawn) {
-							this.syncPlayerToTouchSpawnAtCurrentLayout();
-						}
 						if (
+							!this.pendingTouchDeathRespawn &&
 							this.touchControls?.visible &&
-							isTouchDevice(this) &&
-							!this.pendingTouchDeathRespawn
+							isTouchDevice(this)
 						) {
-							const want = this.touchSpawnExpectedAtCurrentLayout();
-							this.applyTouchSpawnSpriteCoords(want);
+							const spawn = this.resolveTouchSpawnPlacement(false);
+							this.applyTouchSpawnSpriteCoords(spawn);
 						}
 						this.setupLevelColliders();
 						this.reconcileTouchSpawnSpriteWithExpected();
@@ -1031,7 +1028,7 @@ export class Play extends Scene {
 			isTouchDevice(this)
 		) {
 			const want = this.touchSpawnExpectedAtCurrentLayout();
-			return Math.abs(this.player.sprite.x - want.x) <= 4;
+			return Math.abs(this.player.sprite.x - Math.round(want.x)) <= 4;
 		}
 		return true;
 	}
