@@ -81,7 +81,8 @@ if ! run_isolated_walk "mid-death" QA_MID_DEATH_RESIZE_ONLY=1 > "$mid_json" 2>"$
 fi
 echo MID_DEATH_RESIZE_DONE | tee -a "$LOG"
 
-if ! run_isolated_walk "probe" QA_DEATH_ROTATE_PROBE=1 >/dev/null 2>&1; then
+probe_json="/tmp/donebar-probe.json"
+if ! run_isolated_walk "probe" QA_DEATH_ROTATE_PROBE=1 > "$probe_json" 2>"$probe_json.err"; then
   echo PROBE_FAIL | tee -a "$LOG"
   exit 1
 fi
