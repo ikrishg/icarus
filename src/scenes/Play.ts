@@ -1021,7 +1021,19 @@ export class Play extends Scene {
 	}
 
 	isTouchSpawnLayoutSettled(): boolean {
-		return this.touchSpawnLayoutEpochDone === this.touchSpawnLayoutEpoch;
+		if (this.touchSpawnLayoutEpochDone !== this.touchSpawnLayoutEpoch) {
+			return false;
+		}
+		if (
+			import.meta.env.VITE_ENABLE_QA_HOOKS === 'true' &&
+			this.touchControls?.visible &&
+			this.player?.sprite?.body &&
+			isTouchDevice(this)
+		) {
+			const want = this.touchSpawnExpectedAtCurrentLayout();
+			return Math.abs(this.player.sprite.x - want.x) <= 4;
+		}
+		return true;
 	}
 
 	private touchSpawnCoordsAtCurrentLayoutScale(): { x: number; y: number } {
@@ -1065,6 +1077,14 @@ export class Play extends Scene {
 	/** Snap sprite to expected touch spawn when layout settled but position is stale. */
 	private reconcileTouchSpawnSpriteWithExpected(): void {
 		if (import.meta.env.VITE_NOSNAP_PROOF === 'true') {
+			return;
+		}
+		if (this.preparingTouchLevelForQa) {
+			if (this.touchControls?.visible && this.player?.sprite?.body) {
+				this.applyTouchSpawnSpriteCoords(
+					this.touchSpawnExpectedAtCurrentLayout(),
+				);
+			}
 			return;
 		}
 		if (
